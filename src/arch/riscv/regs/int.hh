@@ -75,6 +75,10 @@ enum : RegIndex
     NumArchRegs,
 
     _Ureg0Idx = NumArchRegs,
+    _IndVar0Idx,
+    _IndVar1Idx,
+    _IndVar2Idx,
+    _IndVar3Idx,
 
     NumRegs
 };
@@ -120,7 +124,11 @@ inline constexpr RegId
     T4 = intRegClass[_T4Idx],
     T5 = intRegClass[_T5Idx],
     T6 = intRegClass[_T6Idx],
-    Ureg0 = intRegClass[_Ureg0Idx];
+    Ureg0 = intRegClass[_Ureg0Idx],
+    IndVar0 = intRegClass[_IndVar0Idx],
+    IndVar1 = intRegClass[_IndVar1Idx],
+    IndVar2 = intRegClass[_IndVar2Idx],
+    IndVar3 = intRegClass[_IndVar3Idx];
 
 const std::vector<std::string> RegNames = {
     "zero", "ra", "sp", "gp",
@@ -142,7 +150,11 @@ inline constexpr auto
     &ThreadPointerReg = int_reg::Tp,
     &ReturnValueReg = int_reg::A0,
     &AMOTempReg = int_reg::Ureg0,
-    &SyscallNumReg = int_reg::A7;
+    &SyscallNumReg = int_reg::A7,
+    &IndVar0Reg = int_reg::IndVar0,
+    &IndVar1Reg = int_reg::IndVar1,
+    &IndVar2Reg = int_reg::IndVar2,
+    &IndVar3Reg = int_reg::IndVar3;
 
 inline constexpr RegId ArgumentRegs[] = {
     int_reg::A0, int_reg::A1, int_reg::A2, int_reg::A3,

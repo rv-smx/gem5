@@ -61,6 +61,10 @@ def operands {{
     'Rp2': IntReg('ud', 'RP2 + 8', 'IsInteger', 3),
     'ra': IntReg('ud', 'ReturnAddrReg', 'IsInteger', 1),
     'sp': IntReg('ud', 'StackPointerReg', 'IsInteger', 2),
+    'iv0': IntReg('ud', 'IndVar0Reg', 'IsInteger', 4),
+    'iv1': IntReg('ud', 'IndVar1Reg', 'IsInteger', 4),
+    'iv2': IntReg('ud', 'IndVar2Reg', 'IsInteger', 4),
+    'iv3': IntReg('ud', 'IndVar3Reg', 'IsInteger', 4),
 
     'a0': IntReg('ud', '10', 'IsInteger', 1),
 
