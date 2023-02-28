@@ -150,11 +150,12 @@ inline constexpr auto
     &ThreadPointerReg = int_reg::Tp,
     &ReturnValueReg = int_reg::A0,
     &AMOTempReg = int_reg::Ureg0,
-    &SyscallNumReg = int_reg::A7,
-    &IndVar0Reg = int_reg::IndVar0,
-    &IndVar1Reg = int_reg::IndVar1,
-    &IndVar2Reg = int_reg::IndVar2,
-    &IndVar3Reg = int_reg::IndVar3;
+    &SyscallNumReg = int_reg::A7;
+
+inline constexpr RegId IndvarRegs[] = {
+    int_reg::IndVar0, int_reg::IndVar1,
+    int_reg::IndVar2, int_reg::IndVar3,
+};
 
 inline constexpr RegId ArgumentRegs[] = {
     int_reg::A0, int_reg::A1, int_reg::A2, int_reg::A3,
