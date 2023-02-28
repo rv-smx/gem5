@@ -26,8 +26,8 @@
  * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-#ifndef __ARCH_RISCV_INSTS_COMPRESSED_HH__
-#define __ARCH_RISCV_INSTS_COMPRESSED_HH__
+#ifndef __ARCH_RISCV_INSTS_SMX_HH__
+#define __ARCH_RISCV_INSTS_SMX_HH__
 
 #include <string>
 
@@ -68,4 +68,4 @@ class SmxBranchOp : public RiscvStaticInst
 } // namespace RiscvISA
 } // namespace gem5
 
-#endif // __ARCH_RISCV_INSTS_COMPRESSED_HH__
+#endif // __ARCH_RISCV_INSTS_SMX_HH__
