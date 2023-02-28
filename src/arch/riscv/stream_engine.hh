@@ -32,6 +32,7 @@
 #include <vector>
 
 #include "base/types.hh"
+#include "sim/serialize.hh"
 
 namespace gem5
 {
@@ -109,6 +110,8 @@ class StreamEngine
     }
 
     void clear();
+    void serialize(CheckpointOut &cp) const;
+    void unserialize(CheckpointIn &cp);
 
     bool addIndvarConfig(RegVal init_val, RegVal step_val, RegVal final_val,
             SmxStopCond cond, unsigned width, bool is_unsigned);

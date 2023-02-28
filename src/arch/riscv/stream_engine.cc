@@ -34,13 +34,15 @@
 #include "arch/riscv/regs/int.hh"
 #include "base/bitfield.hh"
 #include "base/compiler.hh"
+#include "base/logging.hh"
 #include "cpu/thread_context.hh"
 #include "debug/StreamEngine.hh"
 
 namespace
 {
 
-constexpr unsigned MAX_INDVAR_NUM = 4;
+constexpr unsigned MAX_INDVAR_NUM =
+    sizeof(gem5::RiscvISA::IndvarRegs) / sizeof(gem5::RegId);
 constexpr unsigned MAX_MEMORY_NUM = 32;
 constexpr unsigned MAX_ADDR_NUM = 4;
 
@@ -108,6 +110,20 @@ StreamEngine::clear()
     mems.clear();
 }
 
+void
+StreamEngine::serialize(CheckpointOut &cp) const
+{
+    // TODO
+    panic("Unimplemented!");
+}
+
+void
+StreamEngine::unserialize(CheckpointIn &cp)
+{
+    // TODO
+    panic("Unimplemented!");
+}
+
 bool
 StreamEngine::addIndvarConfig(RegVal _init_val, RegVal _step_val,
         RegVal _final_val, SmxStopCond cond, unsigned width, bool is_unsigned)
@@ -151,8 +167,8 @@ StreamEngine::addAddrConfig(
         RegVal stride1, unsigned dep1, SmxStreamKind kind1,
         RegVal stride2, unsigned dep2, SmxStreamKind kind2)
 {
-    return addAddrConfigForLastMem(stride1, dep1, kind1) &&
-            addAddrConfigForLastMem(stride2, dep2, kind2);
+    if (!addAddrConfigForLastMem(stride1, dep1, kind1)) return false;
+    return !stride2 || addAddrConfigForLastMem(stride2, dep2, kind2);
 }
 
 bool
@@ -192,36 +208,20 @@ StreamEngine::step(ThreadContext *tc, unsigned indvar_id)
 RegVal
 StreamEngine::getIndvarReg(ThreadContext *tc, unsigned indvar_id) const
 {
-    switch (indvar_id) {
-      case 0:
-        return tc->getReg(IndVar0Reg);
-      case 1:
-        return tc->getReg(IndVar1Reg);
-      case 2:
-        return tc->getReg(IndVar2Reg);
-      case 3:
-        return tc->getReg(IndVar3Reg);
-      default:
-        GEM5_UNREACHABLE;
+    if (indvar_id < MAX_INDVAR_NUM) {
+        return tc->getReg(IndvarRegs[indvar_id]);
     }
+    GEM5_UNREACHABLE;
 }
 
 void
 StreamEngine::setIndvarReg(ThreadContext *tc, unsigned indvar_id,
         RegVal value)
 {
-    switch (indvar_id) {
-      case 0:
-        return tc->setReg(IndVar0Reg, value);
-      case 1:
-        return tc->setReg(IndVar1Reg, value);
-      case 2:
-        return tc->setReg(IndVar2Reg, value);
-      case 3:
-        return tc->setReg(IndVar3Reg, value);
-      default:
-        GEM5_UNREACHABLE;
+    if (indvar_id < MAX_INDVAR_NUM) {
+        return tc->setReg(IndvarRegs[indvar_id], value);
     }
+    GEM5_UNREACHABLE;
 }
 
 bool
