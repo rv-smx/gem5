@@ -31,6 +31,33 @@
 // SMX instructions
 //
 
+def template SmxConstructor {{
+    %(class_name)s::%(class_name)s(MachInst machInst)
+        : %(base_class)s("%(mnemonic)s", machInst, %(op_class)s)
+    {
+        %(set_reg_idx_arr)s;
+        %(set_indvar_reg)s;
+        %(constructor)s;
+    }
+}};
+
+def template SmxExecute {{
+    Fault
+    %(class_name)s::execute(ExecContext *xc,
+        trace::InstRecord *traceData) const
+    {
+        auto tc = xc->tcBase();
+        auto isa = static_cast<RiscvISA::ISA *>(tc->getIsaPtr());
+        auto &se = isa->streamEngine();
+
+        %(op_decl)s;
+        %(op_rd)s;
+        %(code)s;
+        %(op_wb)s;
+        return NoFault;
+    }
+}};
+
 def template SmxBranchDeclare {{
     //
     // Static instruction class for "%(mnemonic)s".
@@ -49,12 +76,49 @@ def template SmxBranchDeclare {{
     };
 }};
 
-def format SBOp(code, *opt_flags) {{
-    regs = ['destRegIdx(0)']
-    iop = InstObjParams(name, Name, 'SmxBranchOp',
-        {'code': code, 'regs': ','.join(regs)}, opt_flags)
-    header_output = SmxBranchDeclare.subst(iop)
-    decoder_output = BasicConstructor.subst(iop)
+def format SmxOp(code, set_indvar_reg='', *opt_flags) {{
+    iop = InstObjParams(name, Name, 'SmxOp',
+        {'code': code, 'set_indvar_reg': set_indvar_reg}, opt_flags)
+    header_output = BasicDeclare.subst(iop)
+    decoder_output = SmxConstructor.subst(iop)
     decode_block = BasicDecode.subst(iop)
-    exec_output = BasicExecute.subst(iop)
+    exec_output = SmxExecute.subst(iop)
+}};
+
+def format SmxStepOp(code, *opt_flags) {{
+    set_indvar_reg = '''
+        setIndvarSrcs();
+        setIndvarDests();
+    '''
+    iop = InstObjParams(name, Name, 'SmxImmOp',
+        {'code': code, 'set_indvar_reg': set_indvar_reg}, opt_flags)
+    header_output = BasicDeclare.subst(iop)
+    decoder_output = SmxConstructor.subst(iop)
+    decode_block = BasicDecode.subst(iop)
+    exec_output = SmxExecute.subst(iop)
+}};
+
+def format SmxStepBrOp(code, *opt_flags) {{
+    set_indvar_reg = '''
+        setIndvarSrcs();
+        setIndvarDests();
+    '''
+    iop = InstObjParams(name, Name, 'SmxBranchOp',
+        {'code': code, 'set_indvar_reg': set_indvar_reg}, opt_flags)
+    header_output = SmxBranchDeclare.subst(iop)
+    decoder_output = SmxConstructor.subst(iop)
+    decode_block = BasicDecode.subst(iop)
+    exec_output = SmxExecute.subst(iop)
+}};
+
+def format SmxBrOp(code, *opt_flags) {{
+    set_indvar_reg = '''
+        setIndvarSrcs();
+    '''
+    iop = InstObjParams(name, Name, 'SmxBranchOp',
+        {'code': code, 'set_indvar_reg': set_indvar_reg}, opt_flags)
+    header_output = SmxBranchDeclare.subst(iop)
+    decoder_output = SmxConstructor.subst(iop)
+    decode_block = BasicDecode.subst(iop)
+    exec_output = SmxExecute.subst(iop)
 }};
