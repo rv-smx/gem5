@@ -526,6 +526,7 @@ ISA::serialize(CheckpointOut &cp) const
 {
     DPRINTF(Checkpoint, "Serializing Riscv Misc Registers\n");
     SERIALIZE_CONTAINER(miscRegFile);
+    _streamEngine.serialize(cp);
 }
 
 void
@@ -533,6 +534,7 @@ ISA::unserialize(CheckpointIn &cp)
 {
     DPRINTF(Checkpoint, "Unserializing Riscv Misc Registers\n");
     UNSERIALIZE_CONTAINER(miscRegFile);
+    _streamEngine.unserialize(cp);
 }
 
 const int WARN_FAILURE = 10000;
