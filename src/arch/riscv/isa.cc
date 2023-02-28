@@ -256,6 +256,8 @@ void ISA::clear()
     miscRegFile[MISCREG_TSELECT] = 1;
     // NMI is always enabled.
     miscRegFile[MISCREG_NMIE] = 1;
+
+    _streamEngine.clear();
 }
 
 bool

@@ -40,6 +40,7 @@
 #include "arch/generic/isa.hh"
 #include "arch/riscv/pcstate.hh"
 #include "arch/riscv/regs/misc.hh"
+#include "arch/riscv/stream_engine.hh"
 #include "arch/riscv/types.hh"
 #include "base/types.hh"
 
@@ -72,6 +73,7 @@ class ISA : public BaseISA
   protected:
     std::vector<RegVal> miscRegFile;
     bool checkAlignment;
+    StreamEngine _streamEngine;
 
     bool hpmCounterEnabled(int counter) const;
 
@@ -108,6 +110,8 @@ class ISA : public BaseISA
     }
 
     bool alignmentCheckEnabled() const { return checkAlignment; }
+    StreamEngine &streamEngine() { return _streamEngine; }
+    const StreamEngine &streamEngine() const { return _streamEngine; }
 
     bool inUserMode() const override;
     void copyRegsFrom(ThreadContext *src) override;
