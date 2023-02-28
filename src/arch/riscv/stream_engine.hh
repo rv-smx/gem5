@@ -102,10 +102,6 @@ class StreamEngine
     bool addAddrConfigForLastMem(RegVal stride, unsigned dep,
             SmxStreamKind kind);
 
-    RegVal getIndvarReg(ThreadContext *tc, unsigned indvar_id);
-
-    void setIndvarReg(ThreadContext *tc, unsigned indvar_id, RegVal value);
-
   public:
     StreamEngine()
     {
@@ -128,6 +124,10 @@ class StreamEngine
     bool end();
 
     bool step(ThreadContext *tc, unsigned indvar_id);
+
+    RegVal getIndvarReg(ThreadContext *tc, unsigned indvar_id) const;
+
+    void setIndvarReg(ThreadContext *tc, unsigned indvar_id, RegVal value);
 
     bool isValidStream(unsigned id, SmxStreamKind kind) const;
 

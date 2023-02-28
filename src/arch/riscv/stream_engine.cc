@@ -101,41 +101,6 @@ StreamEngine::addAddrConfigForLastMem(RegVal stride, unsigned dep,
     return true;
 }
 
-RegVal
-StreamEngine::getIndvarReg(ThreadContext *tc, unsigned indvar_id)
-{
-    switch (indvar_id) {
-      case 0:
-        return tc->getReg(IndVar0Reg);
-      case 1:
-        return tc->getReg(IndVar1Reg);
-      case 2:
-        return tc->getReg(IndVar2Reg);
-      case 3:
-        return tc->getReg(IndVar3Reg);
-      default:
-        GEM5_UNREACHABLE;
-    }
-}
-
-void
-StreamEngine::setIndvarReg(ThreadContext *tc, unsigned indvar_id,
-        RegVal value)
-{
-    switch (indvar_id) {
-      case 0:
-        return tc->setReg(IndVar0Reg, value);
-      case 1:
-        return tc->setReg(IndVar1Reg, value);
-      case 2:
-        return tc->setReg(IndVar2Reg, value);
-      case 3:
-        return tc->setReg(IndVar3Reg, value);
-      default:
-        GEM5_UNREACHABLE;
-    }
-}
-
 void
 StreamEngine::clear()
 {
@@ -222,6 +187,41 @@ StreamEngine::step(ThreadContext *tc, unsigned indvar_id)
         setIndvarReg(tc, indvar_id, ivs[indvar_id].initVal);
     }
     return true;
+}
+
+RegVal
+StreamEngine::getIndvarReg(ThreadContext *tc, unsigned indvar_id) const
+{
+    switch (indvar_id) {
+      case 0:
+        return tc->getReg(IndVar0Reg);
+      case 1:
+        return tc->getReg(IndVar1Reg);
+      case 2:
+        return tc->getReg(IndVar2Reg);
+      case 3:
+        return tc->getReg(IndVar3Reg);
+      default:
+        GEM5_UNREACHABLE;
+    }
+}
+
+void
+StreamEngine::setIndvarReg(ThreadContext *tc, unsigned indvar_id,
+        RegVal value)
+{
+    switch (indvar_id) {
+      case 0:
+        return tc->setReg(IndVar0Reg, value);
+      case 1:
+        return tc->setReg(IndVar1Reg, value);
+      case 2:
+        return tc->setReg(IndVar2Reg, value);
+      case 3:
+        return tc->setReg(IndVar3Reg, value);
+      default:
+        GEM5_UNREACHABLE;
+    }
 }
 
 bool
