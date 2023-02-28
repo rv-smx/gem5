@@ -31,6 +31,7 @@
 #include <sstream>
 #include <string>
 
+#include "arch/riscv/regs/int.hh"
 #include "arch/riscv/utility.hh"
 #include "cpu/static_inst.hh"
 
@@ -40,8 +41,24 @@ namespace gem5
 namespace RiscvISA
 {
 
+void
+SmxOp::setIndvarSrcs()
+{
+    for (const auto &iv : IndvarRegs) {
+        setSrcRegIdx(_numSrcRegs++, iv);
+    }
+}
+
+void
+SmxOp::setIndvarDests()
+{
+    for (const auto &iv : IndvarRegs) {
+        setDestRegIdx(_numDestRegs++, iv);
+    }
+}
+
 std::string
-SmxBranchOp::generateDisassembly(
+SmxImmOp::generateDisassembly(
         Addr pc, const loader::SymbolTable *symtab) const
 {
     std::stringstream ss;

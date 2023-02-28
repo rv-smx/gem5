@@ -42,22 +42,48 @@ namespace RiscvISA
 {
 
 /**
- * Base class for SMX branch operations
+ * Base class for all SMX operations
  */
-class SmxBranchOp : public RiscvStaticInst
+class SmxOp : public RiscvStaticInst
+{
+  protected:
+    SmxOp(const char *mnem, MachInst _machInst, OpClass __opClass)
+        : RiscvStaticInst(mnem, _machInst, __opClass)
+    {}
+
+    void setIndvarSrcs();
+    void setIndvarDests();
+};
+
+/**
+ * Base class for SMX operations with immediates
+ */
+class SmxImmOp : public SmxOp
 {
   protected:
     uint64_t stream;
     int64_t imm;
 
-    /// Constructor
-    SmxBranchOp(const char *mnem, MachInst _machInst, OpClass __opClass)
-        : RiscvStaticInst(mnem, _machInst, __opClass),
-            stream(RS1), imm(sext<13>(FUNCT12 << 1))
+    SmxImmOp(const char *mnem, MachInst _machInst, OpClass __opClass)
+        : SmxOp(mnem, _machInst, __opClass),
+            stream(RS1), imm(sext<12>(FUNCT12))
     {}
 
     std::string generateDisassembly(
         Addr pc, const loader::SymbolTable *symtab) const override;
+};
+
+/**
+ * Base class for SMX branch operations
+ */
+class SmxBranchOp : public SmxImmOp
+{
+  protected:
+    SmxBranchOp(const char *mnem, MachInst _machInst, OpClass __opClass)
+        : SmxImmOp(mnem, _machInst, __opClass)
+    {
+        imm <<= 1;
+    }
 
     std::unique_ptr<PCStateBase> branchTarget(
             const PCStateBase &branch_pc) const override;
