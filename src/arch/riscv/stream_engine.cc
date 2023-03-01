@@ -200,8 +200,8 @@ StreamEngine::step(ExecContext *xc, const SmxOp *op, unsigned indvar_id)
     auto value = getIndvarSrcReg(xc, op, indvar_id) + iv.stepVal;
     setIndvarDestReg(xc, op, indvar_id,
         applyWidthUnsigned(value, iv.width, iv.isUnsigned));
-    for (; indvar_id < ivs.size(); ++indvar_id) {
-        setIndvarDestReg(xc, op, indvar_id, ivs[indvar_id].initVal);
+    for (unsigned id = indvar_id + 1; id < ivs.size(); ++id) {
+        setIndvarDestReg(xc, op, id, ivs[id].initVal);
     }
     return true;
 }
@@ -211,7 +211,8 @@ StreamEngine::getIndvarSrcReg(ExecContext *xc, const SmxOp *op,
         unsigned indvar_id) const
 {
     if (op->hasIndvarSrcs() && indvar_id < MAX_INDVAR_NUM) {
-        return xc->getRegOperand(op, indvar_id);
+        return xc->getRegOperand(op,
+            op->numSrcRegs() - IndvarRegNum + indvar_id);
     }
     GEM5_UNREACHABLE;
 }
@@ -221,7 +222,8 @@ StreamEngine::setIndvarDestReg(ExecContext *xc, const SmxOp *op,
         unsigned indvar_id, RegVal value)
 {
     if (op->hasIndvarDests() && indvar_id < MAX_INDVAR_NUM) {
-        return xc->setRegOperand(op, indvar_id, value);
+        return xc->setRegOperand(op,
+            op->numDestRegs() - IndvarRegNum + indvar_id, value);
     }
     GEM5_UNREACHABLE;
 }
