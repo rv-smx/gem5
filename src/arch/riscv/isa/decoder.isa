@@ -456,7 +456,7 @@ decode QUADRANT default Unknown::unknown() {
             }}, IsNonSpeculative, IsSerializeAfter);
             0x3: decode FUNCT7 {
                 0x00: SmxReadyOp::smx_ready({{
-                    if (!se.ready(tc)) {
+                    if (!se.ready(xc, this)) {
                         return std::make_shared<IllegalInstFault>(
                                 "stream engine is not ready", machInst);
                     }
@@ -776,33 +776,33 @@ decode QUADRANT default Unknown::unknown() {
 
         0x0a: decode FUNCT3 {
             0x0: SmxStepOp::smx_step({{
-                if (!se.step(tc, stream)) {
+                if (!se.step(xc, this, stream)) {
                     return std::make_shared<IllegalInstFault>(
                             "smx.step references an invalid stream",
                             machInst);
                 }
-                Rd = se.getIndvarReg(tc, stream);
+                Rd = se.getIndvarSrcReg(xc, this, stream);
             }});
             0x1: SmxStepBrOp::smx_step_bl({{
-                if (!se.step(tc, stream)) {
+                if (!se.step(xc, this, stream)) {
                     return std::make_shared<IllegalInstFault>(
                             "smx.step.bl references an invalid stream",
                             machInst);
                 }
-                Rd = se.getIndvarReg(tc, stream);
-                if (se.isNotInLoop(tc, stream)) {
+                Rd = se.getIndvarSrcReg(xc, this, stream);
+                if (se.isNotInLoop(xc, this, stream)) {
                     NPC = NPC;
                 } else {
                     NPC = PC + imm;
                 }
             }}, IsDirectControl, IsCondControl);
             0x2: SmxStepBrOp::smx_step_j({{
-                if (!se.step(tc, stream)) {
+                if (!se.step(xc, this, stream)) {
                     return std::make_shared<IllegalInstFault>(
                             "smx.step.j references an invalid stream",
                             machInst);
                 }
-                Rd = se.getIndvarReg(tc, stream);
+                Rd = se.getIndvarSrcReg(xc, this, stream);
                 NPC = PC + imm;
             }}, IsDirectControl, IsUncondControl);
             0x3: SmxBrOp::smx_bnl({{
@@ -811,8 +811,8 @@ decode QUADRANT default Unknown::unknown() {
                             "smx.bnl references an invalid stream",
                             machInst);
                 }
-                Rd = se.getIndvarReg(tc, stream);
-                if (se.isNotInLoop(tc, stream)) {
+                Rd = se.getIndvarSrcReg(xc, this, stream);
+                if (se.isNotInLoop(xc, this, stream)) {
                     NPC = PC + imm;
                 } else {
                     NPC = NPC;

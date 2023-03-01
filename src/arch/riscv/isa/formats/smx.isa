@@ -46,9 +46,8 @@ def template SmxExecute {{
     %(class_name)s::execute(ExecContext *xc,
         trace::InstRecord *traceData) const
     {
-        auto tc = xc->tcBase();
-        auto isa = static_cast<RiscvISA::ISA *>(tc->getIsaPtr());
-        auto &se = isa->streamEngine();
+        auto &se = static_cast<RiscvISA::ISA *>(xc->tcBase()->getIsaPtr())
+            ->streamEngine();
 
         %(op_decl)s;
         %(op_rd)s;
@@ -191,9 +190,8 @@ def template SmxLoadExecute {{
     %(class_name)s::execute(ExecContext *xc,
         trace::InstRecord *traceData) const
     {
-        auto tc = xc->tcBase();
-        auto isa = static_cast<RiscvISA::ISA *>(tc->getIsaPtr());
-        auto &se = isa->streamEngine();
+        auto &se = static_cast<RiscvISA::ISA *>(xc->tcBase()->getIsaPtr())
+            ->streamEngine();
 
         Addr EA;
 
@@ -204,7 +202,7 @@ def template SmxLoadExecute {{
             return std::make_shared<IllegalInstFault>(
                     "SMX load references an invalid stream", machInst);
         }
-        EA = se.getMemoryAddr(tc, stream);
+        EA = se.getMemoryAddr(xc, this, stream);
 
         if (!alignmentOk(xc, EA, sizeof(Mem))) {
             return std::make_shared<AddressFault>(EA, LOAD_ADDR_MISALIGNED);
@@ -225,9 +223,8 @@ def template SmxLoadExecute {{
     %(class_name)s::initiateAcc(ExecContext *xc,
         trace::InstRecord *traceData) const
     {
-        auto tc = xc->tcBase();
-        auto isa = static_cast<RiscvISA::ISA *>(tc->getIsaPtr());
-        auto &se = isa->streamEngine();
+        auto &se = static_cast<RiscvISA::ISA *>(xc->tcBase()->getIsaPtr())
+            ->streamEngine();
 
         Addr EA;
 
@@ -238,7 +235,7 @@ def template SmxLoadExecute {{
             return std::make_shared<IllegalInstFault>(
                     "SMX load references an invalid stream", machInst);
         }
-        EA = se.getMemoryAddr(tc, stream);
+        EA = se.getMemoryAddr(xc, this, stream);
 
         if (!alignmentOk(xc, EA, sizeof(Mem))) {
             return std::make_shared<AddressFault>(EA, LOAD_ADDR_MISALIGNED);
@@ -267,9 +264,8 @@ def template SmxStoreExecute {{
     %(class_name)s::execute(ExecContext *xc,
         trace::InstRecord *traceData) const
     {
-        auto tc = xc->tcBase();
-        auto isa = static_cast<RiscvISA::ISA *>(tc->getIsaPtr());
-        auto &se = isa->streamEngine();
+        auto &se = static_cast<RiscvISA::ISA *>(xc->tcBase()->getIsaPtr())
+            ->streamEngine();
 
         Addr EA;
 
@@ -280,7 +276,7 @@ def template SmxStoreExecute {{
             return std::make_shared<IllegalInstFault>(
                     "SMX load references an invalid stream", machInst);
         }
-        EA = se.getMemoryAddr(tc, stream);
+        EA = se.getMemoryAddr(xc, this, stream);
 
         %(code)s;
 
@@ -303,9 +299,8 @@ def template SmxStoreExecute {{
     %(class_name)s::initiateAcc(ExecContext *xc,
         trace::InstRecord *traceData) const
     {
-        auto tc = xc->tcBase();
-        auto isa = static_cast<RiscvISA::ISA *>(tc->getIsaPtr());
-        auto &se = isa->streamEngine();
+        auto &se = static_cast<RiscvISA::ISA *>(xc->tcBase()->getIsaPtr())
+            ->streamEngine();
 
         Addr EA;
 
@@ -316,7 +311,7 @@ def template SmxStoreExecute {{
             return std::make_shared<IllegalInstFault>(
                     "SMX load references an invalid stream", machInst);
         }
-        EA = se.getMemoryAddr(tc, stream);
+        EA = se.getMemoryAddr(xc, this, stream);
 
         %(code)s;
 
