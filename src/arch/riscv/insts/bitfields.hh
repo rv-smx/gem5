@@ -16,4 +16,9 @@
 #define RS1     bits(machInst, 19, 15)
 #define RS2     bits(machInst, 24, 20)
 
+#define LDWIDTH    bits(machInst, 21, 20)
+#define LDUNSIGNED bits(machInst, 22)
+#define MMSEL      bits(machInst, 31, 25)
+#define STWIDTH    bits(machInst, 8, 7)
+
 #endif // __ARCH_RISCV_BITFIELDS_HH__

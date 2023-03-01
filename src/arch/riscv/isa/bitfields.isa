@@ -3,6 +3,7 @@
 // Copyright (c) 2015 RISC-V Foundation
 // Copyright (c) 2016 The University of Virginia
 // Copyright (c) 2020 Barkhausen Institut
+// Copyright (c) 2023 Max Xing
 // All rights reserved.
 //
 // Redistribution and use in source and binary forms, with or without
@@ -129,3 +130,16 @@ def bitfield BIT24         <24>;
 def bitfield RNUM       <23:20>;
 def bitfield KFUNCT5    <29:25>;
 def bitfield BS         <31:30>;
+
+// SMX instructions
+def bitfield STOPCOND   <10:7>;
+def bitfield IVUNSIGNED <11>;
+def bitfield RS3        <31:27>;
+def bitfield DEP1       <11:7>;
+def bitfield KIND1      <25>;
+def bitfield MSPREFETCH <26>;
+def bitfield MSWIDTH    <29:27>;
+def bitfield DEP2       <30:26>;
+def bitfield KIND2      <31>;
+def bitfield LDSIGWIDTH <22:20>;
+def bitfield STWIDTH    <8:7>;
