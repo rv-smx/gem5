@@ -33,6 +33,7 @@
 
 #include "arch/riscv/regs/int.hh"
 #include "arch/riscv/utility.hh"
+#include "base/compiler.hh"
 #include "cpu/static_inst.hh"
 
 namespace gem5
@@ -58,12 +59,39 @@ SmxOp::setIndvarDests()
 }
 
 std::string
+SmxOp::generateDisassembly(
+        Addr pc, const loader::SymbolTable *symtab) const
+{
+    return mnemonic;
+}
+
+std::string
 SmxImmOp::generateDisassembly(
         Addr pc, const loader::SymbolTable *symtab) const
 {
     std::stringstream ss;
     ss << mnemonic << ' ' << registerName(destRegIdx(0)) << ", " <<
         stream << ", " << imm;
+    return ss.str();
+}
+
+std::string
+SmxLoadOp::generateDisassembly(
+        Addr pc, const loader::SymbolTable *symtab) const
+{
+    std::stringstream ss;
+    ss << mnemonic << ' ' << registerName(destRegIdx(0)) << ", " <<
+        stream << ", " << sel;
+    return ss.str();
+}
+
+std::string
+SmxStoreOp::generateDisassembly(
+        Addr pc, const loader::SymbolTable *symtab) const
+{
+    std::stringstream ss;
+    ss << mnemonic << ' ' << stream << ", " <<
+        registerName(srcRegIdx(0)) << ", " << sel;
     return ss.str();
 }
 

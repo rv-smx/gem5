@@ -53,6 +53,9 @@ class SmxOp : public RiscvStaticInst
 
     void setIndvarSrcs();
     void setIndvarDests();
+
+    std::string generateDisassembly(
+        Addr pc, const loader::SymbolTable *symtab) const override;
 };
 
 /**
@@ -67,6 +70,55 @@ class SmxImmOp : public SmxOp
     SmxImmOp(const char *mnem, MachInst _machInst, OpClass __opClass)
         : SmxOp(mnem, _machInst, __opClass),
             stream(RS1), imm(sext<12>(FUNCT12))
+    {}
+
+    std::string generateDisassembly(
+        Addr pc, const loader::SymbolTable *symtab) const override;
+};
+
+/**
+ * Base class for SMX memory operations
+ */
+class SmxMemOp : public SmxOp
+{
+  protected:
+    Request::Flags memAccessFlags;
+    uint64_t stream;
+    uint64_t width;
+    uint64_t sel;
+
+    SmxMemOp(const char *mnem, MachInst _machInst, OpClass __opClass,
+            uint64_t _width)
+        : SmxOp(mnem, _machInst, __opClass),
+            stream(RS1), width(_width), sel(MMSEL)
+    {}
+};
+
+/**
+ * Base class for SMX load operations
+ */
+class SmxLoadOp : public SmxMemOp
+{
+  protected:
+    bool is_unsigned;
+
+    SmxLoadOp(const char *mnem, MachInst machInst, OpClass __opClass)
+        : SmxMemOp(mnem, machInst, __opClass, LDWIDTH),
+            is_unsigned(!!LDUNSIGNED)
+    {}
+
+    std::string generateDisassembly(
+        Addr pc, const loader::SymbolTable *symtab) const override;
+};
+
+/**
+ * Base class for SMX store operations
+ */
+class SmxStoreOp : public SmxMemOp
+{
+  protected:
+    SmxStoreOp(const char *mnem, MachInst machInst, OpClass __opClass)
+        : SmxMemOp(mnem, machInst, __opClass, STWIDTH)
     {}
 
     std::string generateDisassembly(
