@@ -4,6 +4,7 @@
 // Copyright (c) 2017 The University of Virginia
 // Copyright (c) 2020 Barkhausen Institut
 // Copyright (c) 2021 StreamComputing Corp
+// Copyright (c) 2023 Max Xing
 // All rights reserved.
 //
 // Redistribution and use in source and binary forms, with or without
@@ -430,6 +431,104 @@ decode QUADRANT default Unknown::unknown() {
             }
         }
 
+        0x02: decode FUNCT3 {
+            0x0: SmxCfgIvOp::smx_cfg_iv({{
+                if (!se.addIndvarConfig(Rs1, Rs2, Rs3,
+                        (SmxStopCond)STOPCOND, FUNCT2, IVUNSIGNED)) {
+                    return std::make_shared<IllegalInstFault>(
+                            "invalid induction variable stream config",
+                            machInst);
+                }
+            }}, IsNonSpeculative, IsSerializeAfter);
+            0x1: SmxCfgMsOp::smx_cfg_ms({{
+                if (!se.addMemoryConfig(Rs1, Rs2, DEP1,
+                        (SmxStreamKind)KIND1, MSPREFETCH, MSWIDTH)) {
+                    return std::make_shared<IllegalInstFault>(
+                            "invalid memory stream config", machInst);
+                }
+            }}, IsNonSpeculative, IsSerializeAfter);
+            0x2: SmxCfgAddrOp::smx_cfg_addr({{
+                if (!se.addAddrConfig(Rs1, DEP1, (SmxStreamKind)KIND1,
+                        Rs2, DEP2, (SmxStreamKind)KIND2)) {
+                    return std::make_shared<IllegalInstFault>(
+                            "invalid address factor", machInst);
+                }
+            }}, IsNonSpeculative, IsSerializeAfter);
+            0x3: decode FUNCT7 {
+                0x00: SmxOp::smx_ready({{
+                    if (!se.ready(tc)) {
+                        return std::make_shared<IllegalInstFault>(
+                                "stream engine is not ready", machInst);
+                    }
+                }}, IsNonSpeculative, IsSerializeAfter);
+                0x01: SmxOp::smx_end({{
+                    if (!se.end()) {
+                        return std::make_shared<IllegalInstFault>(
+                                "stream engine can not end", machInst);
+                    }
+                }}, IsNonSpeculative, IsSerializeAfter);
+            }
+            0x4: decode LDSIGWIDTH {
+                format SmxLoadOp {
+                    0x0: smx_lb({{ Rd_sd = Mem_sb; }});
+                    0x1: smx_lh({{ Rd_sd = Mem_sh; }});
+                    0x2: smx_lw({{ Rd_sd = Mem_sw; }});
+                    0x3: smx_ld({{ Rd_sd = Mem_sd; }});
+                    0x4: smx_lbu({{ Rd = Mem_ub; }});
+                    0x5: smx_lhu({{ Rd = Mem_uh; }});
+                    0x6: smx_lwu({{ Rd = Mem_uw; }});
+                }
+            }
+            0x5: decode STWIDTH {
+                format SmxStoreOp {
+                    0x0: smx_sb({{ Mem_ub = Rs2_ub; }});
+                    0x1: smx_sh({{ Mem_uh = Rs2_uh; }});
+                    0x2: smx_sw({{ Mem_uw = Rs2_uw; }});
+                    0x3: smx_sd({{ Mem_ud = Rs2_ud; }});
+                }
+            }
+            0x6: decode LDSIGWIDTH {
+                format SmxLoadOp {
+                    0x2: smx_flw({{
+                        STATUS status = xc->readMiscReg(MISCREG_STATUS);
+                        if (status.fs == FPUStatus::OFF)
+                            return std::make_shared<IllegalInstFault>(
+                                        "FPU is off", machInst);
+                        freg_t fd;
+                        fd = freg(f32(Mem_uw));
+                        Fd_bits = fd.v;
+                    }}, FloatMemReadOp);
+                    0x3: smx_fld({{
+                        STATUS status = xc->readMiscReg(MISCREG_STATUS);
+                        if (status.fs == FPUStatus::OFF)
+                            return std::make_shared<IllegalInstFault>(
+                                        "FPU is off", machInst);
+                        freg_t fd;
+                        fd = freg(f64(Mem));
+                        Fd_bits = fd.v;
+                    }}, FloatMemReadOp);
+                }
+            }
+            0x7: decode STWIDTH {
+                format SmxStoreOp {
+                    0x2: smx_fsw({{
+                        STATUS status = xc->readMiscReg(MISCREG_STATUS);
+                        if (status.fs == FPUStatus::OFF)
+                            return std::make_shared<IllegalInstFault>(
+                                    "FPU is off", machInst);
+                        Mem_uw = (uint32_t)Fs2_bits;
+                    }}, FloatMemWriteOp);
+                    0x3: smx_fsd({{
+                        STATUS status = xc->readMiscReg(MISCREG_STATUS);
+                        if (status.fs == FPUStatus::OFF)
+                            return std::make_shared<IllegalInstFault>(
+                                    "FPU is off", machInst);
+                        Mem_ud = Fs2_bits;
+                    }}, FloatMemWriteOp);
+                }
+            }
+        }
+
         0x03: decode FUNCT3 {
             format FenceOp {
                 0x0: fence({{
@@ -673,6 +772,52 @@ decode QUADRANT default Unknown::unknown() {
                     Mem_ud = Fs2_bits;
                 }}, inst_flags=FloatMemWriteOp);
             }
+        }
+
+        0x0a: decode FUNCT3 {
+            0x0: SmxStepOp::smx_step({{
+                if (!se.step(tc, stream)) {
+                    return std::make_shared<IllegalInstFault>(
+                            "smx.step references an invalid stream",
+                            machInst);
+                }
+                Rd = se.getIndvarReg(tc, stream);
+            }});
+            0x1: SmxStepBrOp::smx_step_bl({{
+                if (!se.step(tc, stream)) {
+                    return std::make_shared<IllegalInstFault>(
+                            "smx.step.bl references an invalid stream",
+                            machInst);
+                }
+                Rd = se.getIndvarReg(tc, stream);
+                if (se.isNotInLoop(tc, stream)) {
+                    NPC = NPC;
+                } else {
+                    NPC = PC + imm;
+                }
+            }}, IsDirectControl, IsCondControl);
+            0x2: SmxStepBrOp::smx_step_j({{
+                if (!se.step(tc, stream)) {
+                    return std::make_shared<IllegalInstFault>(
+                            "smx.step.j references an invalid stream",
+                            machInst);
+                }
+                Rd = se.getIndvarReg(tc, stream);
+                NPC = PC + imm;
+            }}, IsDirectControl, IsUncondControl);
+            0x3: SmxBrOp::smx_bnl({{
+                if (!se.isValidStream(stream, SMX_KIND_IV)) {
+                    return std::make_shared<IllegalInstFault>(
+                            "smx.bnl references an invalid stream",
+                            machInst);
+                }
+                Rd = se.getIndvarReg(tc, stream);
+                if (se.isNotInLoop(tc, stream)) {
+                    NPC = PC + imm;
+                } else {
+                    NPC = NPC;
+                }
+            }}, IsDirectControl, IsCondControl);
         }
 
         0x0b: decode FUNCT3 {
