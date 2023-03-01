@@ -56,6 +56,7 @@ SmxOp::setIndvarDests()
 {
     for (const auto &iv : IndvarRegs) {
         setDestRegIdx(_numDestRegs++, iv);
+        ++_numTypedDestRegs[intRegClass.type()];
     }
     _hasIndvarDests = true;
 }
