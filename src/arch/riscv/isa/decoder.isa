@@ -455,7 +455,7 @@ decode QUADRANT default Unknown::unknown() {
                 }
             }}, IsNonSpeculative, IsSerializeAfter);
             0x3: decode FUNCT7 {
-                0x00: SmxOp::smx_ready({{
+                0x00: SmxReadyOp::smx_ready({{
                     if (!se.ready(tc)) {
                         return std::make_shared<IllegalInstFault>(
                                 "stream engine is not ready", machInst);
