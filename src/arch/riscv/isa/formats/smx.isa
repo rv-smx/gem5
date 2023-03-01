@@ -362,6 +362,11 @@ def template SmxBranchDeclare {{
     };
 }};
 
+// Should be synced with `arch/riscv/regs/int.hh`.
+let {{
+    INDVAR_REG_NUM = 4;
+}};
+
 def format SmxOp(code, *opt_flags) {{
     iop = InstObjParams(name, Name, 'SmxOp',
         {'code': code, 'set_indvar_reg': ''}, opt_flags)
@@ -374,6 +379,7 @@ def format SmxOp(code, *opt_flags) {{
 def format SmxReadyOp(code, *opt_flags) {{
     iop = InstObjParams(name, Name, 'SmxOp',
         {'code': code, 'set_indvar_reg': 'setIndvarDests();'}, opt_flags)
+    iop.padDestRegIdx(INDVAR_REG_NUM)
     header_output = BasicDeclare.subst(iop)
     decoder_output = SmxConstructor.subst(iop)
     decode_block = BasicDecode.subst(iop)
@@ -410,6 +416,7 @@ def format SmxCfgAddrOp(code, *opt_flags) {{
 def format SmxLoadOp(code, *opt_flags) {{
     iop = InstObjParams(name, Name, 'SmxLoadOp',
         {'code': code, 'set_indvar_reg': 'setIndvarSrcs();'}, opt_flags)
+    iop.padSrcRegIdx(INDVAR_REG_NUM)
     header_output = SmxMemDeclare.subst(iop)
     decoder_output = SmxConstructor.subst(iop)
     decode_block = BasicDecode.subst(iop)
@@ -419,6 +426,7 @@ def format SmxLoadOp(code, *opt_flags) {{
 def format SmxStoreOp(code, *opt_flags) {{
     iop = InstObjParams(name, Name, 'SmxStoreOp',
         {'code': code, 'set_indvar_reg': 'setIndvarSrcs();'}, opt_flags)
+    iop.padSrcRegIdx(INDVAR_REG_NUM)
     header_output = SmxMemDeclare.subst(iop)
     decoder_output = SmxConstructor.subst(iop)
     decode_block = BasicDecode.subst(iop)
@@ -432,6 +440,8 @@ def format SmxStepOp(code, *opt_flags) {{
     '''
     iop = InstObjParams(name, Name, 'SmxImmOp',
         {'code': code, 'set_indvar_reg': set_indvar_reg}, opt_flags)
+    iop.padSrcRegIdx(INDVAR_REG_NUM)
+    iop.padDestRegIdx(INDVAR_REG_NUM)
     header_output = BasicDeclare.subst(iop)
     decoder_output = SmxConstructor.subst(iop)
     decode_block = BasicDecode.subst(iop)
@@ -445,6 +455,8 @@ def format SmxStepBrOp(code, *opt_flags) {{
     '''
     iop = InstObjParams(name, Name, 'SmxBranchOp',
         {'code': code, 'set_indvar_reg': set_indvar_reg}, opt_flags)
+    iop.padSrcRegIdx(INDVAR_REG_NUM)
+    iop.padDestRegIdx(INDVAR_REG_NUM)
     header_output = SmxBranchDeclare.subst(iop)
     decoder_output = SmxConstructor.subst(iop)
     decode_block = BasicDecode.subst(iop)
@@ -457,6 +469,7 @@ def format SmxBrOp(code, *opt_flags) {{
     '''
     iop = InstObjParams(name, Name, 'SmxBranchOp',
         {'code': code, 'set_indvar_reg': set_indvar_reg}, opt_flags)
+    iop.padSrcRegIdx(INDVAR_REG_NUM)
     header_output = SmxBranchDeclare.subst(iop)
     decoder_output = SmxConstructor.subst(iop)
     decode_block = BasicDecode.subst(iop)
