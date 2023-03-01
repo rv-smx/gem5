@@ -35,7 +35,7 @@
 #include "base/bitfield.hh"
 #include "base/compiler.hh"
 #include "base/logging.hh"
-#include "cpu/thread_context.hh"
+#include "cpu/exec_context.hh"
 #include "debug/StreamEngine.hh"
 
 namespace
@@ -171,14 +171,14 @@ StreamEngine::addAddrConfig(
 }
 
 bool
-StreamEngine::ready(ThreadContext *tc)
+StreamEngine::ready(ExecContext *xc, const SmxOp *op)
 {
     if (ivs.empty()) {
         DPRINTF(StreamEngine, "No induction variable stream configured\n");
         return false;
     }
     for (unsigned i = 0; i < ivs.size(); ++i) {
-        setIndvarReg(tc, i, ivs[i].initVal);
+        setIndvarDestReg(xc, op, i, ivs[i].initVal);
     }
     DPRINTF(StreamEngine, "Stream memory access is ready\n");
     return true;
@@ -193,34 +193,35 @@ StreamEngine::end()
 }
 
 bool
-StreamEngine::step(ThreadContext *tc, unsigned indvar_id)
+StreamEngine::step(ExecContext *xc, const SmxOp *op, unsigned indvar_id)
 {
     if (!isValidStream(indvar_id, SMX_KIND_IV)) return false;
     auto &iv = ivs[indvar_id];
-    auto value = getIndvarReg(tc, indvar_id) + iv.stepVal;
-    setIndvarReg(tc, indvar_id,
+    auto value = getIndvarSrcReg(xc, op, indvar_id) + iv.stepVal;
+    setIndvarDestReg(xc, op, indvar_id,
         applyWidthUnsigned(value, iv.width, iv.isUnsigned));
     for (; indvar_id < ivs.size(); ++indvar_id) {
-        setIndvarReg(tc, indvar_id, ivs[indvar_id].initVal);
+        setIndvarDestReg(xc, op, indvar_id, ivs[indvar_id].initVal);
     }
     return true;
 }
 
 RegVal
-StreamEngine::getIndvarReg(ThreadContext *tc, unsigned indvar_id) const
+StreamEngine::getIndvarSrcReg(ExecContext *xc, const SmxOp *op,
+        unsigned indvar_id) const
 {
-    if (indvar_id < MAX_INDVAR_NUM) {
-        return tc->getReg(IndvarRegs[indvar_id]);
+    if (op->hasIndvarSrcs() && indvar_id < MAX_INDVAR_NUM) {
+        return xc->getRegOperand(op, indvar_id);
     }
     GEM5_UNREACHABLE;
 }
 
 void
-StreamEngine::setIndvarReg(ThreadContext *tc, unsigned indvar_id,
-        RegVal value)
+StreamEngine::setIndvarDestReg(ExecContext *xc, const SmxOp *op,
+        unsigned indvar_id, RegVal value)
 {
-    if (indvar_id < MAX_INDVAR_NUM) {
-        return tc->setReg(IndvarRegs[indvar_id], value);
+    if (op->hasIndvarDests() && indvar_id < MAX_INDVAR_NUM) {
+        return xc->setRegOperand(op, indvar_id, value);
     }
     GEM5_UNREACHABLE;
 }
@@ -248,13 +249,14 @@ StreamEngine::isValidStream(unsigned id, SmxStreamKind kind) const
 }
 
 Addr
-StreamEngine::getMemoryAddr(ThreadContext *tc, unsigned memory_id) const
+StreamEngine::getMemoryAddr(ExecContext *xc, const SmxOp *op,
+        unsigned memory_id) const
 {
     const auto &mem = mems[memory_id];
     Addr vaddr = mem.base;
     for (const auto &addr : mem.addrs) {
         assert(addr.kind == SMX_KIND_IV);
-        vaddr += getIndvarReg(tc, addr.dep) * addr.stride;
+        vaddr += getIndvarSrcReg(xc, op, addr.dep) * addr.stride;
     }
     DPRINTF(StreamEngine, "Got memory address %llx from stream %u\n",
         vaddr, memory_id);
@@ -262,10 +264,11 @@ StreamEngine::getMemoryAddr(ThreadContext *tc, unsigned memory_id) const
 }
 
 bool
-StreamEngine::isNotInLoop(ThreadContext *tc, unsigned indvar_id) const
+StreamEngine::isNotInLoop(ExecContext *xc, const SmxOp *op,
+        unsigned indvar_id) const
 {
     const auto &iv = ivs[indvar_id];
-    auto value = getIndvarReg(tc, indvar_id);
+    auto value = getIndvarSrcReg(xc, op, indvar_id);
     switch (iv.cond) {
       case SMX_COND_GT:
         return (int64_t)value > (ino64_t)iv.finalVal;

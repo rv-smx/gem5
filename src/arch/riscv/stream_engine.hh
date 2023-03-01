@@ -31,13 +31,14 @@
 
 #include <vector>
 
+#include "arch/riscv/insts/smx.hh"
 #include "base/types.hh"
 #include "sim/serialize.hh"
 
 namespace gem5
 {
 
-class ThreadContext;
+class ExecContext;
 
 namespace RiscvISA
 {
@@ -122,21 +123,25 @@ class StreamEngine
     bool addAddrConfig(RegVal stride1, unsigned dep1, SmxStreamKind kind1,
             RegVal stride2, unsigned dep2, SmxStreamKind kind2);
 
-    bool ready(ThreadContext *tc);
+    bool ready(ExecContext *xc, const SmxOp *op);
 
     bool end();
 
-    bool step(ThreadContext *tc, unsigned indvar_id);
+    bool step(ExecContext *xc, const SmxOp *op, unsigned indvar_id);
 
-    RegVal getIndvarReg(ThreadContext *tc, unsigned indvar_id) const;
+    RegVal getIndvarSrcReg(ExecContext *xc, const SmxOp *op,
+            unsigned indvar_id) const;
 
-    void setIndvarReg(ThreadContext *tc, unsigned indvar_id, RegVal value);
+    void setIndvarDestReg(ExecContext *xc, const SmxOp *op,
+            unsigned indvar_id, RegVal value);
 
     bool isValidStream(unsigned id, SmxStreamKind kind) const;
 
-    Addr getMemoryAddr(ThreadContext *tc, unsigned memory_id) const;
+    Addr getMemoryAddr(ExecContext *xc, const SmxOp *op,
+            unsigned memory_id) const;
 
-    bool isNotInLoop(ThreadContext *tc, unsigned indvar_id) const;
+    bool isNotInLoop(ExecContext *xc, const SmxOp *op,
+            unsigned indvar_id) const;
 };
 
 } // namespace RiscvISA
