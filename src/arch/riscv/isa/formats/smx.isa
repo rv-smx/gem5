@@ -58,6 +58,292 @@ def template SmxExecute {{
     }
 }};
 
+def template SmxDisasmDeclare {{
+    //
+    // Static instruction class for "%(mnemonic)s".
+    //
+    class %(class_name)s : public %(base_class)s
+    {
+      private:
+        %(reg_idx_arr_decl)s;
+
+      public:
+        /// Constructor.
+        %(class_name)s(MachInst machInst);
+        Fault execute(ExecContext *, trace::InstRecord *) const override;
+        std::string generateDisassembly(
+            Addr pc, const loader::SymbolTable *symtab) const override;
+    };
+}};
+
+def template SmxCfgIvDisasm {{
+    std::string
+    %(class_name)s::generateDisassembly(
+            Addr pc, const loader::SymbolTable *symtab) const
+    {
+        std::stringstream ss;
+        ss << "smx.cfg.iv.";
+        switch (FUNCT2) {
+          case 0b00:
+            ss << 'b';
+            break;
+          case 0b01:
+            ss << 'h';
+            break;
+          case 0b10:
+            ss << 'w';
+            break;
+          case 0b11:
+            ss << 'd';
+            break;
+          default:
+            GEM5_UNREACHABLE;
+        }
+        if (IVUNSIGNED) ss << 'u';
+        ss << ' ' << registerName(srcRegIdx(0)) << ", " <<
+            registerName(srcRegIdx(1)) << ", " <<
+            registerName(srcRegIdx(2)) << ", ";
+        switch (STOPCOND) {
+          case SMX_COND_GT:
+            ss << "gt";
+            break;
+          case SMX_COND_GE:
+            ss << "ge";
+            break;
+          case SMX_COND_LT:
+            ss << "lt";
+            break;
+          case SMX_COND_LE:
+            ss << "le";
+            break;
+          case SMX_COND_GTU:
+            ss << "gtu";
+            break;
+          case SMX_COND_GEU:
+            ss << "geu";
+            break;
+          case SMX_COND_LTU:
+            ss << "ltu";
+            break;
+          case SMX_COND_LEU:
+            ss << "leu";
+            break;
+          case SMX_COND_EQ:
+            ss << "eq";
+            break;
+          case SMX_COND_NE:
+            ss << "ne";
+            break;
+          default:
+            GEM5_UNREACHABLE;
+        }
+        return ss.str();
+    }
+}};
+
+def template SmxCfgMsDisasm {{
+    std::string
+    %(class_name)s::generateDisassembly(
+            Addr pc, const loader::SymbolTable *symtab) const
+    {
+        std::stringstream ss;
+        ss << mnemonic << ' ' << registerName(srcRegIdx(0)) << ", " <<
+            registerName(srcRegIdx(1)) << ", " << DEP1 << ", " <<
+            KIND1 << ", " << MSWIDTH;
+        return ss.str();
+    }
+}};
+
+def template SmxCfgAddrDisasm {{
+    std::string
+    %(class_name)s::generateDisassembly(
+            Addr pc, const loader::SymbolTable *symtab) const
+    {
+        std::stringstream ss;
+        ss << mnemonic << ' ' << registerName(srcRegIdx(0)) << ", " <<
+            DEP1 << ", " << KIND1 << ", " << registerName(srcRegIdx(1)) <<
+            ", " << DEP2 << ", " << KIND2;
+        return ss.str();
+    }
+}};
+
+def template SmxMemDeclare {{
+    //
+    // Static instruction class for "%(mnemonic)s".
+    //
+    class %(class_name)s : public %(base_class)s
+    {
+      private:
+        %(reg_idx_arr_decl)s;
+
+      public:
+        /// Constructor.
+        %(class_name)s(MachInst machInst);
+        Fault execute(ExecContext *, trace::InstRecord *) const override;
+        Fault initiateAcc(ExecContext *, trace::InstRecord *) const override;
+        Fault completeAcc(PacketPtr, ExecContext *,
+                          trace::InstRecord *) const override;
+        using %(base_class)s::generateDisassembly;
+    };
+}};
+
+def template SmxLoadExecute {{
+    Fault
+    %(class_name)s::execute(ExecContext *xc,
+        trace::InstRecord *traceData) const
+    {
+        auto tc = xc->tcBase();
+        auto isa = static_cast<RiscvISA::ISA *>(tc->getIsaPtr());
+        auto &se = isa->streamEngine();
+
+        Addr EA;
+
+        %(op_decl)s;
+        %(op_rd)s;
+
+        if (!se.isValidStream(stream, SMX_KIND_MS)) {
+            return std::make_shared<IllegalInstFault>(
+                    "SMX load references an invalid stream", machInst);
+        }
+        EA = se.getMemoryAddr(tc, stream);
+
+        if (!alignmentOk(xc, EA, sizeof(Mem))) {
+            return std::make_shared<AddressFault>(EA, LOAD_ADDR_MISALIGNED);
+        }
+        {
+            Fault fault =
+                readMemAtomicLE(xc, traceData, EA, Mem, memAccessFlags);
+            if (fault != NoFault)
+                return fault;
+        }
+
+        %(code)s;
+        %(op_wb)s;
+        return NoFault;
+    }
+
+    Fault
+    %(class_name)s::initiateAcc(ExecContext *xc,
+        trace::InstRecord *traceData) const
+    {
+        auto tc = xc->tcBase();
+        auto isa = static_cast<RiscvISA::ISA *>(tc->getIsaPtr());
+        auto &se = isa->streamEngine();
+
+        Addr EA;
+
+        %(op_src_decl)s;
+        %(op_rd)s;
+
+        if (!se.isValidStream(stream, SMX_KIND_MS)) {
+            return std::make_shared<IllegalInstFault>(
+                    "SMX load references an invalid stream", machInst);
+        }
+        EA = se.getMemoryAddr(tc, stream);
+
+        if (!alignmentOk(xc, EA, sizeof(Mem))) {
+            return std::make_shared<AddressFault>(EA, LOAD_ADDR_MISALIGNED);
+        }
+        return initiateMemRead(xc, traceData, EA, Mem, memAccessFlags);
+    }
+
+    Fault
+    %(class_name)s::completeAcc(PacketPtr pkt, ExecContext *xc,
+        trace::InstRecord *traceData) const
+    {
+        %(op_decl)s;
+        %(op_rd)s;
+
+        getMemLE(pkt, Mem, traceData);
+
+        %(code)s;
+        %(op_wb)s;
+
+        return NoFault;
+    }
+}};
+
+def template SmxStoreExecute {{
+    Fault
+    %(class_name)s::execute(ExecContext *xc,
+        trace::InstRecord *traceData) const
+    {
+        auto tc = xc->tcBase();
+        auto isa = static_cast<RiscvISA::ISA *>(tc->getIsaPtr());
+        auto &se = isa->streamEngine();
+
+        Addr EA;
+
+        %(op_decl)s;
+        %(op_rd)s;
+
+        if (!se.isValidStream(stream, SMX_KIND_MS)) {
+            return std::make_shared<IllegalInstFault>(
+                    "SMX load references an invalid stream", machInst);
+        }
+        EA = se.getMemoryAddr(tc, stream);
+
+        %(code)s;
+
+        if (!alignmentOk(xc, EA, sizeof(Mem))) {
+            return std::make_shared<AddressFault>(EA, STORE_ADDR_MISALIGNED);
+        }
+        {
+            Fault fault =
+                writeMemAtomicLE(xc, traceData, Mem, EA, memAccessFlags,
+                        nullptr);
+            if (fault != NoFault)
+                return fault;
+        }
+
+        %(op_wb)s;
+        return NoFault;
+    }
+
+    Fault
+    %(class_name)s::initiateAcc(ExecContext *xc,
+        trace::InstRecord *traceData) const
+    {
+        auto tc = xc->tcBase();
+        auto isa = static_cast<RiscvISA::ISA *>(tc->getIsaPtr());
+        auto &se = isa->streamEngine();
+
+        Addr EA;
+
+        %(op_decl)s;
+        %(op_rd)s;
+
+        if (!se.isValidStream(stream, SMX_KIND_MS)) {
+            return std::make_shared<IllegalInstFault>(
+                    "SMX load references an invalid stream", machInst);
+        }
+        EA = se.getMemoryAddr(tc, stream);
+
+        %(code)s;
+
+        if (!alignmentOk(xc, EA, sizeof(Mem))) {
+            return std::make_shared<AddressFault>(EA, STORE_ADDR_MISALIGNED);
+        }
+        {
+            Fault fault = writeMemTimingLE(xc, traceData, Mem, EA,
+                memAccessFlags, nullptr);
+            if (fault != NoFault)
+                return fault;
+        }
+
+        %(op_wb)s;
+
+        return NoFault;
+    }
+
+    Fault
+    %(class_name)s::completeAcc(PacketPtr pkt, ExecContext *xc,
+        trace::InstRecord *traceData) const
+    {
+        return NoFault;
+    }
+}};
+
 def template SmxBranchDeclare {{
     //
     // Static instruction class for "%(mnemonic)s".
@@ -76,13 +362,67 @@ def template SmxBranchDeclare {{
     };
 }};
 
-def format SmxOp(code, set_indvar_reg='', *opt_flags) {{
+def format SmxOp(code, *opt_flags) {{
     iop = InstObjParams(name, Name, 'SmxOp',
-        {'code': code, 'set_indvar_reg': set_indvar_reg}, opt_flags)
+        {'code': code, 'set_indvar_reg': ''}, opt_flags)
     header_output = BasicDeclare.subst(iop)
     decoder_output = SmxConstructor.subst(iop)
     decode_block = BasicDecode.subst(iop)
     exec_output = SmxExecute.subst(iop)
+}};
+
+def format SmxReadyOp(code, *opt_flags) {{
+    iop = InstObjParams(name, Name, 'SmxOp',
+        {'code': code, 'set_indvar_reg': 'setIndvarDests();'}, opt_flags)
+    header_output = BasicDeclare.subst(iop)
+    decoder_output = SmxConstructor.subst(iop)
+    decode_block = BasicDecode.subst(iop)
+    exec_output = SmxExecute.subst(iop)
+}};
+
+def format SmxCfgIvOp(code, *opt_flags) {{
+    iop = InstObjParams(name, Name, 'SmxOp',
+        {'code': code, 'set_indvar_reg': ''}, opt_flags)
+    header_output = SmxDisasmDeclare.subst(iop)
+    decoder_output = SmxConstructor.subst(iop)
+    decode_block = BasicDecode.subst(iop)
+    exec_output = SmxExecute.subst(iop) + SmxCfgIvDisasm.subst(iop)
+}};
+
+def format SmxCfgMsOp(code, *opt_flags) {{
+    iop = InstObjParams(name, Name, 'SmxOp',
+        {'code': code, 'set_indvar_reg': ''}, opt_flags)
+    header_output = SmxDisasmDeclare.subst(iop)
+    decoder_output = SmxConstructor.subst(iop)
+    decode_block = BasicDecode.subst(iop)
+    exec_output = SmxExecute.subst(iop) + SmxCfgMsDisasm.subst(iop)
+}};
+
+def format SmxCfgAddrOp(code, *opt_flags) {{
+    iop = InstObjParams(name, Name, 'SmxOp',
+        {'code': code, 'set_indvar_reg': ''}, opt_flags)
+    header_output = SmxDisasmDeclare.subst(iop)
+    decoder_output = SmxConstructor.subst(iop)
+    decode_block = BasicDecode.subst(iop)
+    exec_output = SmxExecute.subst(iop) + SmxCfgAddrDisasm.subst(iop)
+}};
+
+def format SmxLoadOp(code, *opt_flags) {{
+    iop = InstObjParams(name, Name, 'SmxLoadOp',
+        {'code': code, 'set_indvar_reg': 'setIndvarSrcs();'}, opt_flags)
+    header_output = SmxMemDeclare.subst(iop)
+    decoder_output = SmxConstructor.subst(iop)
+    decode_block = BasicDecode.subst(iop)
+    exec_output = SmxLoadExecute.subst(iop)
+}};
+
+def format SmxStoreOp(code, *opt_flags) {{
+    iop = InstObjParams(name, Name, 'SmxStoreOp',
+        {'code': code, 'set_indvar_reg': 'setIndvarSrcs();'}, opt_flags)
+    header_output = SmxMemDeclare.subst(iop)
+    decoder_output = SmxConstructor.subst(iop)
+    decode_block = BasicDecode.subst(iop)
+    exec_output = SmxStoreExecute.subst(iop)
 }};
 
 def format SmxStepOp(code, *opt_flags) {{
