@@ -100,9 +100,8 @@ def template SmxCfgIvDisasm {{
             GEM5_UNREACHABLE;
         }
         if (IVUNSIGNED) ss << 'u';
-        ss << ' ' << registerName(srcRegIdx(0)) << ", " <<
-            registerName(srcRegIdx(1)) << ", " <<
-            registerName(srcRegIdx(2)) << ", ";
+        ss << ' ' << getSrcRegName(0) << ", " << getSrcRegName(1) <<
+            ", " << getSrcRegName(2) << ", ";
         switch (STOPCOND) {
           case SMX_COND_GT:
             ss << "gt";
@@ -147,8 +146,8 @@ def template SmxCfgMsDisasm {{
             Addr pc, const loader::SymbolTable *symtab) const
     {
         std::stringstream ss;
-        ss << mnemonic << ' ' << registerName(srcRegIdx(0)) << ", " <<
-            registerName(srcRegIdx(1)) << ", " << DEP1 << ", " <<
+        ss << mnemonic << ' ' << getSrcRegName(0) << ", " <<
+            getSrcRegName(1) << ", " << DEP1 << ", " <<
             KIND1 << ", " << MSWIDTH;
         return ss.str();
     }
@@ -160,8 +159,8 @@ def template SmxCfgAddrDisasm {{
             Addr pc, const loader::SymbolTable *symtab) const
     {
         std::stringstream ss;
-        ss << mnemonic << ' ' << registerName(srcRegIdx(0)) << ", " <<
-            DEP1 << ", " << KIND1 << ", " << registerName(srcRegIdx(1)) <<
+        ss << mnemonic << ' ' << getSrcRegName(0) << ", " <<
+            DEP1 << ", " << KIND1 << ", " << getSrcRegName(1) <<
             ", " << DEP2 << ", " << KIND2;
         return ss.str();
     }
@@ -376,16 +375,6 @@ def format SmxOp(code, *opt_flags) {{
     exec_output = SmxExecute.subst(iop)
 }};
 
-def format SmxReadyOp(code, *opt_flags) {{
-    iop = InstObjParams(name, Name, 'SmxOp',
-        {'code': code, 'set_indvar_reg': 'setIndvarDests();'}, opt_flags)
-    iop.padDestRegIdx(INDVAR_REG_NUM)
-    header_output = BasicDeclare.subst(iop)
-    decoder_output = SmxConstructor.subst(iop)
-    decode_block = BasicDecode.subst(iop)
-    exec_output = SmxExecute.subst(iop)
-}};
-
 def format SmxCfgIvOp(code, *opt_flags) {{
     iop = InstObjParams(name, Name, 'SmxOp',
         {'code': code, 'set_indvar_reg': ''}, opt_flags)
@@ -411,6 +400,16 @@ def format SmxCfgAddrOp(code, *opt_flags) {{
     decoder_output = SmxConstructor.subst(iop)
     decode_block = BasicDecode.subst(iop)
     exec_output = SmxExecute.subst(iop) + SmxCfgAddrDisasm.subst(iop)
+}};
+
+def format SmxReadyOp(code, *opt_flags) {{
+    iop = InstObjParams(name, Name, 'SmxOp',
+        {'code': code, 'set_indvar_reg': 'setIndvarDests();'}, opt_flags)
+    iop.padDestRegIdx(INDVAR_REG_NUM)
+    header_output = BasicDeclare.subst(iop)
+    decoder_output = SmxConstructor.subst(iop)
+    decode_block = BasicDecode.subst(iop)
+    exec_output = SmxExecute.subst(iop)
 }};
 
 def format SmxLoadOp(code, *opt_flags) {{

@@ -48,6 +48,7 @@ SmxOp::setIndvarSrcs()
     for (const auto &iv : IndvarRegs) {
         setSrcRegIdx(_numSrcRegs++, iv);
     }
+    hasIndvarSrcs = true;
 }
 
 void
@@ -56,6 +57,25 @@ SmxOp::setIndvarDests()
     for (const auto &iv : IndvarRegs) {
         setDestRegIdx(_numDestRegs++, iv);
     }
+    hasIndvarDests = true;
+}
+
+std::string
+SmxOp::getSrcRegName(int idx) const
+{
+    if (hasIndvarSrcs)
+        return registerName(srcRegIdx(IndvarRegNum + idx));
+    else
+        return registerName(srcRegIdx(idx));
+}
+
+std::string
+SmxOp::getDestRegName(int idx) const
+{
+    if (hasIndvarDests)
+        return registerName(destRegIdx(IndvarRegNum + idx));
+    else
+        return registerName(destRegIdx(idx));
 }
 
 std::string
@@ -70,7 +90,7 @@ SmxImmOp::generateDisassembly(
         Addr pc, const loader::SymbolTable *symtab) const
 {
     std::stringstream ss;
-    ss << mnemonic << ' ' << registerName(destRegIdx(0)) << ", " <<
+    ss << mnemonic << ' ' << getDestRegName(0) << ", " <<
         stream << ", " << imm;
     return ss.str();
 }
@@ -80,7 +100,7 @@ SmxLoadOp::generateDisassembly(
         Addr pc, const loader::SymbolTable *symtab) const
 {
     std::stringstream ss;
-    ss << mnemonic << ' ' << registerName(destRegIdx(0)) << ", " <<
+    ss << mnemonic << ' ' << getDestRegName(0) << ", " <<
         stream << ", " << sel;
     return ss.str();
 }
@@ -91,7 +111,7 @@ SmxStoreOp::generateDisassembly(
 {
     std::stringstream ss;
     ss << mnemonic << ' ' << stream << ", " <<
-        registerName(srcRegIdx(0)) << ", " << sel;
+        getSrcRegName(0) << ", " << sel;
     return ss.str();
 }
 
