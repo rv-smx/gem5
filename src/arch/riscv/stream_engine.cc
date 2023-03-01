@@ -181,6 +181,7 @@ StreamEngine::ready(ThreadContext *tc)
     for (unsigned i = 0; i < ivs.size(); ++i) {
         setIndvarReg(tc, i, ivs[i].initVal);
     }
+    DPRINTF(StreamEngine, "Stream memory access is ready\n");
     return true;
 }
 
@@ -188,6 +189,7 @@ bool
 StreamEngine::end()
 {
     clear();
+    DPRINTF(StreamEngine, "Stream memory access ended\n");
     return true;
 }
 
@@ -255,6 +257,8 @@ StreamEngine::getMemoryAddr(ThreadContext *tc, unsigned memory_id) const
         assert(addr.kind == SMX_KIND_IV);
         vaddr += getIndvarReg(tc, addr.dep) * addr.stride;
     }
+    DPRINTF(StreamEngine, "Requested memory address %llx of stream %u\n",
+        vaddr, memory_id);
     return vaddr;
 }
 
