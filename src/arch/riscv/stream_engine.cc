@@ -192,18 +192,17 @@ StreamEngine::end()
     return true;
 }
 
-bool
+RegVal
 StreamEngine::step(ExecContext *xc, const SmxOp *op, unsigned indvar_id)
 {
-    if (!isValidStream(indvar_id, SMX_KIND_IV)) return false;
     auto &iv = ivs[indvar_id];
     auto value = getIndvarSrcReg(xc, op, indvar_id) + iv.stepVal;
-    setIndvarDestReg(xc, op, indvar_id,
-        applyWidthUnsigned(value, iv.width, iv.isUnsigned));
+    value = applyWidthUnsigned(value, iv.width, iv.isUnsigned);
+    setIndvarDestReg(xc, op, indvar_id, value);
     for (unsigned id = indvar_id + 1; id < ivs.size(); ++id) {
         setIndvarDestReg(xc, op, id, ivs[id].initVal);
     }
-    return true;
+    return value;
 }
 
 RegVal
@@ -266,11 +265,9 @@ StreamEngine::getMemoryAddr(ExecContext *xc, const SmxOp *op,
 }
 
 bool
-StreamEngine::isNotInLoop(ExecContext *xc, const SmxOp *op,
-        unsigned indvar_id) const
+StreamEngine::isNotInLoop(unsigned indvar_id, RegVal value) const
 {
     const auto &iv = ivs[indvar_id];
-    auto value = getIndvarSrcReg(xc, op, indvar_id);
     switch (iv.cond) {
       case SMX_COND_GT:
         return (int64_t)value > (ino64_t)iv.finalVal;

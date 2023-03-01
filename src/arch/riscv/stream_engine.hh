@@ -127,7 +127,7 @@ class StreamEngine
 
     bool end();
 
-    bool step(ExecContext *xc, const SmxOp *op, unsigned indvar_id);
+    RegVal step(ExecContext *xc, const SmxOp *op, unsigned indvar_id);
 
     RegVal getIndvarSrcReg(ExecContext *xc, const SmxOp *op,
             unsigned indvar_id) const;
@@ -140,8 +140,7 @@ class StreamEngine
     Addr getMemoryAddr(ExecContext *xc, const SmxOp *op,
             unsigned memory_id) const;
 
-    bool isNotInLoop(ExecContext *xc, const SmxOp *op,
-            unsigned indvar_id) const;
+    bool isNotInLoop(unsigned indvar_id, RegVal value) const;
 };
 
 } // namespace RiscvISA

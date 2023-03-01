@@ -776,33 +776,34 @@ decode QUADRANT default Unknown::unknown() {
 
         0x0a: decode FUNCT3 {
             0x0: SmxStepOp::smx_step({{
-                if (!se.step(xc, this, stream)) {
+                if (!se.isValidStream(stream, SMX_KIND_IV)) {
                     return std::make_shared<IllegalInstFault>(
                             "smx.step references an invalid stream",
                             machInst);
                 }
-                Rd = se.getIndvarSrcReg(xc, this, stream);
+                Rd = se.step(xc, this, stream);
             }});
             0x1: SmxStepBrOp::smx_step_bl({{
-                if (!se.step(xc, this, stream)) {
+                if (!se.isValidStream(stream, SMX_KIND_IV)) {
                     return std::make_shared<IllegalInstFault>(
                             "smx.step.bl references an invalid stream",
                             machInst);
                 }
-                Rd = se.getIndvarSrcReg(xc, this, stream);
-                if (se.isNotInLoop(xc, this, stream)) {
+                auto value = se.step(xc, this, stream);
+                Rd = value;
+                if (se.isNotInLoop(stream, value)) {
                     NPC = NPC;
                 } else {
                     NPC = PC + imm;
                 }
             }}, IsDirectControl, IsCondControl);
             0x2: SmxStepBrOp::smx_step_j({{
-                if (!se.step(xc, this, stream)) {
+                if (!se.isValidStream(stream, SMX_KIND_IV)) {
                     return std::make_shared<IllegalInstFault>(
                             "smx.step.j references an invalid stream",
                             machInst);
                 }
-                Rd = se.getIndvarSrcReg(xc, this, stream);
+                Rd = se.step(xc, this, stream);
                 NPC = PC + imm;
             }}, IsDirectControl, IsUncondControl);
             0x3: SmxBrOp::smx_bnl({{
@@ -811,8 +812,9 @@ decode QUADRANT default Unknown::unknown() {
                             "smx.bnl references an invalid stream",
                             machInst);
                 }
-                Rd = se.getIndvarSrcReg(xc, this, stream);
-                if (se.isNotInLoop(xc, this, stream)) {
+                auto value = se.getIndvarSrcReg(xc, this, stream);
+                Rd = value;
+                if (se.isNotInLoop(stream, value)) {
                     NPC = PC + imm;
                 } else {
                     NPC = NPC;
