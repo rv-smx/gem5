@@ -47,12 +47,12 @@ namespace RiscvISA
 class SmxOp : public RiscvStaticInst
 {
   protected:
-    bool hasIndvarSrcs;
-    bool hasIndvarDests;
+    bool _hasIndvarSrcs;
+    bool _hasIndvarDests;
 
     SmxOp(const char *mnem, MachInst _machInst, OpClass __opClass)
         : RiscvStaticInst(mnem, _machInst, __opClass),
-            hasIndvarSrcs(false), hasIndvarDests(false)
+            _hasIndvarSrcs(false), _hasIndvarDests(false)
     {}
 
     void setIndvarSrcs();
@@ -62,6 +62,10 @@ class SmxOp : public RiscvStaticInst
 
     std::string generateDisassembly(
         Addr pc, const loader::SymbolTable *symtab) const override;
+
+  public:
+    bool hasIndvarSrcs() const { return _hasIndvarSrcs; }
+    bool hasIndvarDests() const { return _hasIndvarDests; }
 };
 
 /**

@@ -48,7 +48,7 @@ SmxOp::setIndvarSrcs()
     for (const auto &iv : IndvarRegs) {
         setSrcRegIdx(_numSrcRegs++, iv);
     }
-    hasIndvarSrcs = true;
+    _hasIndvarSrcs = true;
 }
 
 void
@@ -57,13 +57,13 @@ SmxOp::setIndvarDests()
     for (const auto &iv : IndvarRegs) {
         setDestRegIdx(_numDestRegs++, iv);
     }
-    hasIndvarDests = true;
+    _hasIndvarDests = true;
 }
 
 std::string
 SmxOp::getSrcRegName(int idx) const
 {
-    if (hasIndvarSrcs)
+    if (_hasIndvarSrcs)
         return registerName(srcRegIdx(IndvarRegNum + idx));
     else
         return registerName(srcRegIdx(idx));
@@ -72,7 +72,7 @@ SmxOp::getSrcRegName(int idx) const
 std::string
 SmxOp::getDestRegName(int idx) const
 {
-    if (hasIndvarDests)
+    if (_hasIndvarDests)
         return registerName(destRegIdx(IndvarRegNum + idx));
     else
         return registerName(destRegIdx(idx));
