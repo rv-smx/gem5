@@ -41,8 +41,7 @@
 namespace
 {
 
-constexpr unsigned MAX_INDVAR_NUM =
-    sizeof(gem5::RiscvISA::IndvarRegs) / sizeof(gem5::RegId);
+constexpr unsigned MAX_INDVAR_NUM = gem5::RiscvISA::IndvarRegNum;
 constexpr unsigned MAX_MEMORY_NUM = 32;
 constexpr unsigned MAX_ADDR_NUM = 4;
 
@@ -257,7 +256,7 @@ StreamEngine::getMemoryAddr(ThreadContext *tc, unsigned memory_id) const
         assert(addr.kind == SMX_KIND_IV);
         vaddr += getIndvarReg(tc, addr.dep) * addr.stride;
     }
-    DPRINTF(StreamEngine, "Requested memory address %llx of stream %u\n",
+    DPRINTF(StreamEngine, "Got memory address %llx from stream %u\n",
         vaddr, memory_id);
     return vaddr;
 }

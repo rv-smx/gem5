@@ -157,6 +157,9 @@ inline constexpr RegId IndvarRegs[] = {
     int_reg::IndVar2, int_reg::IndVar3,
 };
 
+// Should be synced with `arch/riscv/isa/formats/smx.isa`.
+inline constexpr auto IndvarRegNum = sizeof(IndvarRegs) / sizeof(RegId);
+
 inline constexpr RegId ArgumentRegs[] = {
     int_reg::A0, int_reg::A1, int_reg::A2, int_reg::A3,
     int_reg::A4, int_reg::A5, int_reg::A6, int_reg::A7
