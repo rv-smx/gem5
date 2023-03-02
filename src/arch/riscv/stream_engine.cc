@@ -207,17 +207,27 @@ StreamEngine::end()
 RegVal
 StreamEngine::step(ExecContext *xc, const SmxOp *op, unsigned indvar_id)
 {
-    auto &iv = ivs[indvar_id];
-    auto value = getIndvarSrcReg(xc, op, indvar_id) + iv.stepVal;
-    value = applyWidthUnsigned(value, iv.width, iv.isUnsigned);
-    setIndvarDestReg(xc, op, indvar_id, value);
-    DPRINTF(StreamEngine, "Updated induction variable stream %u = %llu\n",
-        indvar_id, value);
-    for (unsigned id = indvar_id + 1; id < ivs.size(); ++id) {
-        setIndvarDestReg(xc, op, id, ivs[id].initVal);
-        DPRINTF(StreamEngine, "Reset induction variable stream %u\n", id);
+    RegVal ret = 0;
+    for (unsigned id = 0; id < ivs.size(); ++id) {
+        auto &iv = ivs[id];
+        auto value = getIndvarSrcReg(xc, op, id);
+        if (id < indvar_id) {
+            // no change in value
+            value = value;
+        } else if (id == indvar_id) {
+            // step the current induction variable
+            value = applyWidthUnsigned(value + iv.stepVal, iv.width,
+                iv.isUnsigned);
+            ret = value;
+        } else {
+            // reset to initial value
+            value = iv.initVal;
+        }
+        setIndvarDestReg(xc, op, id, value);
+        DPRINTF(StreamEngine, "Updated induction variable stream %u = %llu\n",
+            id, value);
     }
-    return value;
+    return ret;
 }
 
 RegVal
