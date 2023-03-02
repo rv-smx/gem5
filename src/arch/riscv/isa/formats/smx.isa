@@ -99,8 +99,9 @@ def template SmxCfgIvDisasm {{
             GEM5_UNREACHABLE;
         }
         if (IVUNSIGNED) ss << 'u';
-        ss << ' ' << getSrcRegName(0) << ", " << getSrcRegName(1) <<
-            ", " << getSrcRegName(2) << ", ";
+        ss << ' ' << registerName(srcRegIdx(0)) << ", " <<
+            registerName(srcRegIdx(1)) << ", " <<
+            registerName(srcRegIdx(2)) << ", ";
         switch (STOPCOND) {
           case SMX_COND_GT:
             ss << "gt";
@@ -145,8 +146,8 @@ def template SmxCfgMsDisasm {{
             Addr pc, const loader::SymbolTable *symtab) const
     {
         std::stringstream ss;
-        ss << mnemonic << ' ' << getSrcRegName(0) << ", " <<
-            getSrcRegName(1) << ", " << DEP1 << ", " <<
+        ss << mnemonic << ' ' << registerName(srcRegIdx(0)) << ", " <<
+            registerName(srcRegIdx(1)) << ", " << DEP1 << ", " <<
             KIND1 << ", " << MSWIDTH;
         return ss.str();
     }
@@ -158,8 +159,8 @@ def template SmxCfgAddrDisasm {{
             Addr pc, const loader::SymbolTable *symtab) const
     {
         std::stringstream ss;
-        ss << mnemonic << ' ' << getSrcRegName(0) << ", " <<
-            DEP1 << ", " << KIND1 << ", " << getSrcRegName(1) <<
+        ss << mnemonic << ' ' << registerName(srcRegIdx(0)) << ", " <<
+            DEP1 << ", " << KIND1 << ", " << registerName(srcRegIdx(1)) <<
             ", " << DEP2 << ", " << KIND2;
         return ss.str();
     }

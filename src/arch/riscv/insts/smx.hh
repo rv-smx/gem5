@@ -57,8 +57,6 @@ class SmxOp : public RiscvStaticInst
 
     void setIndvarSrcs();
     void setIndvarDests();
-    std::string getSrcRegName(int idx) const;
-    std::string getDestRegName(int idx) const;
 
     std::string generateDisassembly(
         Addr pc, const loader::SymbolTable *symtab) const override;
