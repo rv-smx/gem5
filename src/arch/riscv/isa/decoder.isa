@@ -781,7 +781,7 @@ decode QUADRANT default Unknown::unknown() {
                             "smx.step references an invalid stream",
                             machInst);
                 }
-                Rd = se.step(xc, this, stream);
+                Rd = se.step(xc, this, stream) + imm;
             }});
             0x1: SmxStepBrOp::smx_step_bl({{
                 if (!se.isValidStream(stream, SMX_KIND_IV)) {
