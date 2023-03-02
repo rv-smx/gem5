@@ -94,11 +94,18 @@ StreamEngine::addAddrConfigForLastMem(RegVal stride, unsigned dep,
     }
 
     addrs.push_back({stride, dep, kind});
+    const char *kind_str;
     if (kind == SMX_KIND_IV) {
-        ivs[dep].users.push_back(mems.size() - 1);
+        ivs[dep].users.push_back(memory_id);
+        kind_str = "induction variable";
     } else {
-        mems[dep].users.push_back(mems.size() - 1);
+        mems[dep].users.push_back(memory_id);
+        kind_str = "memory";
     }
+    DPRINTF(StreamEngine,
+        "Added address factor stride=%llu, dependents %s"
+        " stream %u for memory stream %u\n",
+        stride, kind_str, dep, memory_id);
     return true;
 }
 
@@ -142,6 +149,9 @@ StreamEngine::addIndvarConfig(RegVal _init_val, RegVal _step_val,
     auto init_val = applyWidthUnsigned(_init_val, width, is_unsigned);
     auto step_val = applyWidthUnsigned(_step_val, width, is_unsigned);
     auto final_val = applyWidthUnsigned(_final_val, width, is_unsigned);
+    DPRINTF(StreamEngine,
+        "Induction variable stream %u: init=%llu, step=%llu, final=%llu\n",
+        (unsigned)ivs.size(), init_val, step_val, final_val);
     ivs.push_back(
         {init_val, step_val, final_val, cond, width, is_unsigned, {}});
     return true;
@@ -157,6 +167,8 @@ StreamEngine::addMemoryConfig(RegVal base, RegVal stride1, unsigned dep1,
             MAX_MEMORY_NUM);
         return false;
     }
+    DPRINTF(StreamEngine, "Memory stream %u: base=0x%llx\n",
+        (unsigned)mems.size(), base);
     mems.push_back({base, prefetch, width, {}, {}});
     return addAddrConfigForLastMem(stride1, dep1, kind1);
 }
@@ -199,8 +211,11 @@ StreamEngine::step(ExecContext *xc, const SmxOp *op, unsigned indvar_id)
     auto value = getIndvarSrcReg(xc, op, indvar_id) + iv.stepVal;
     value = applyWidthUnsigned(value, iv.width, iv.isUnsigned);
     setIndvarDestReg(xc, op, indvar_id, value);
+    DPRINTF(StreamEngine, "Updated induction variable stream %u = %llu\n",
+        indvar_id, value);
     for (unsigned id = indvar_id + 1; id < ivs.size(); ++id) {
         setIndvarDestReg(xc, op, id, ivs[id].initVal);
+        DPRINTF(StreamEngine, "Reset induction variable stream %u\n", id);
     }
     return value;
 }
@@ -210,8 +225,11 @@ StreamEngine::getIndvarSrcReg(ExecContext *xc, const SmxOp *op,
         unsigned indvar_id) const
 {
     if (op->hasIndvarSrcs() && indvar_id < MAX_INDVAR_NUM) {
-        return xc->getRegOperand(op,
+        auto value = xc->getRegOperand(op,
             op->numSrcRegs() - IndvarRegNum + indvar_id);
+        DPRINTF(StreamEngine, "Got induction variable stream %u = %llu\n",
+            indvar_id, value);
+        return value;
     }
     GEM5_UNREACHABLE;
 }
@@ -221,6 +239,8 @@ StreamEngine::setIndvarDestReg(ExecContext *xc, const SmxOp *op,
         unsigned indvar_id, RegVal value)
 {
     if (op->hasIndvarDests() && indvar_id < MAX_INDVAR_NUM) {
+        DPRINTF(StreamEngine, "Set induction variable stream %u = %llu\n",
+            indvar_id, value);
         return xc->setRegOperand(op,
             op->numDestRegs() - IndvarRegNum + indvar_id, value);
     }
@@ -257,9 +277,13 @@ StreamEngine::getMemoryAddr(ExecContext *xc, const SmxOp *op,
     Addr vaddr = mem.base;
     for (const auto &addr : mem.addrs) {
         assert(addr.kind == SMX_KIND_IV);
-        vaddr += getIndvarSrcReg(xc, op, addr.dep) * addr.stride;
+        auto dep_value = getIndvarSrcReg(xc, op, addr.dep);
+        auto factor = dep_value * addr.stride;
+        vaddr += factor;
+        DPRINTF(StreamEngine, "Factor (dep=%llu) * (stride=%llu) = %llu\n",
+            dep_value, addr.stride, factor);
     }
-    DPRINTF(StreamEngine, "Got memory address %llx from stream %u\n",
+    DPRINTF(StreamEngine, "Got memory address 0x%llx from stream %u\n",
         vaddr, memory_id);
     return vaddr;
 }
