@@ -775,7 +775,15 @@ decode QUADRANT default Unknown::unknown() {
         }
 
         0x0a: decode FUNCT3 {
-            0x0: SmxStepOp::smx_step({{
+            0x0: SmxImmOp::smx_read({{
+                if (!se.isValidStream(stream, SMX_KIND_IV)) {
+                    return std::make_shared<IllegalInstFault>(
+                            "smx.read references an invalid stream",
+                            machInst);
+                }
+                Rd = se.getIndvarSrcReg(xc, this, stream) + imm;
+            }});
+            0x1: SmxStepOp::smx_step({{
                 if (!se.isValidStream(stream, SMX_KIND_IV)) {
                     return std::make_shared<IllegalInstFault>(
                             "smx.step references an invalid stream",
@@ -783,29 +791,20 @@ decode QUADRANT default Unknown::unknown() {
                 }
                 Rd = se.step(xc, this, stream) + imm;
             }});
-            0x1: SmxStepBrOp::smx_step_bl({{
+            0x2: SmxBrOp::smx_bl({{
                 if (!se.isValidStream(stream, SMX_KIND_IV)) {
                     return std::make_shared<IllegalInstFault>(
-                            "smx.step.bl references an invalid stream",
+                            "smx.bl references an invalid stream",
                             machInst);
                 }
-                auto value = se.step(xc, this, stream);
+                auto value = se.getIndvarSrcReg(xc, this, stream);
                 Rd = value;
-                if (se.isNotInLoop(stream, value)) {
-                    NPC = NPC;
-                } else {
+                if (!se.isNotInLoop(stream, value)) {
                     NPC = PC + imm;
+                } else {
+                    NPC = NPC;
                 }
             }}, IsDirectControl, IsCondControl);
-            0x2: SmxStepBrOp::smx_step_j({{
-                if (!se.isValidStream(stream, SMX_KIND_IV)) {
-                    return std::make_shared<IllegalInstFault>(
-                            "smx.step.j references an invalid stream",
-                            machInst);
-                }
-                Rd = se.step(xc, this, stream);
-                NPC = PC + imm;
-            }}, IsDirectControl, IsUncondControl);
             0x3: SmxBrOp::smx_bnl({{
                 if (!se.isValidStream(stream, SMX_KIND_IV)) {
                     return std::make_shared<IllegalInstFault>(
@@ -820,6 +819,43 @@ decode QUADRANT default Unknown::unknown() {
                     NPC = NPC;
                 }
             }}, IsDirectControl, IsCondControl);
+            0x4: SmxStepBrOp::smx_step_bl({{
+                if (!se.isValidStream(stream, SMX_KIND_IV)) {
+                    return std::make_shared<IllegalInstFault>(
+                            "smx.step.bl references an invalid stream",
+                            machInst);
+                }
+                auto value = se.step(xc, this, stream);
+                Rd = value;
+                if (!se.isNotInLoop(stream, value)) {
+                    NPC = PC + imm;
+                } else {
+                    NPC = NPC;
+                }
+            }}, IsDirectControl, IsCondControl);
+            0x5: SmxStepBrOp::smx_step_bnl({{
+                if (!se.isValidStream(stream, SMX_KIND_IV)) {
+                    return std::make_shared<IllegalInstFault>(
+                            "smx.step.bnl references an invalid stream",
+                            machInst);
+                }
+                auto value = se.step(xc, this, stream);
+                Rd = value;
+                if (se.isNotInLoop(stream, value)) {
+                    NPC = PC + imm;
+                } else {
+                    NPC = NPC;
+                }
+            }}, IsDirectControl, IsCondControl);
+            0x6: SmxStepBrOp::smx_step_j({{
+                if (!se.isValidStream(stream, SMX_KIND_IV)) {
+                    return std::make_shared<IllegalInstFault>(
+                            "smx.step.j references an invalid stream",
+                            machInst);
+                }
+                Rd = se.step(xc, this, stream);
+                NPC = PC + imm;
+            }}, IsDirectControl, IsUncondControl);
         }
 
         0x0b: decode FUNCT3 {

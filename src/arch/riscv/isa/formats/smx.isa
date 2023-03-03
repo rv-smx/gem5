@@ -428,6 +428,16 @@ def format SmxStoreOp(code, *opt_flags) {{
     exec_output = SmxStoreExecute.subst(iop)
 }};
 
+def format SmxImmOp(code, *opt_flags) {{
+    iop = InstObjParams(name, Name, 'SmxImmOp',
+        {'code': code, 'set_indvar_reg': 'setIndvarSrcs();'}, opt_flags)
+    iop.padSrcRegIdx(INDVAR_REG_NUM)
+    header_output = BasicDeclare.subst(iop)
+    decoder_output = SmxConstructor.subst(iop)
+    decode_block = BasicDecode.subst(iop)
+    exec_output = SmxExecute.subst(iop)
+}};
+
 def format SmxStepOp(code, *opt_flags) {{
     set_indvar_reg = '''
         setIndvarSrcs();
