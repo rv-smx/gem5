@@ -29,6 +29,7 @@
 #ifndef __ARCH_RISCV_STREAM_ENGINE_HH__
 #define __ARCH_RISCV_STREAM_ENGINE_HH__
 
+#include <queue>
 #include <vector>
 
 #include "arch/riscv/insts/smx.hh"
@@ -39,6 +40,7 @@ namespace gem5
 {
 
 class ExecContext;
+class BaseCPU;
 
 namespace RiscvISA
 {
@@ -103,6 +105,30 @@ class StreamEngine
 
     bool addAddrConfigForLastMem(RegVal stride, unsigned dep,
             SmxStreamKind kind);
+
+    enum PrefetcherState
+    {
+        Stopped,
+        Running,
+        Full,
+    };
+
+    PrefetcherState prefetcherState;
+    std::vector<RegVal> prefetchIndvars;
+    unsigned prefetchMemStreamIdx;
+    std::queue<std::vector<RegVal>> prefetchQueue;
+
+    void schedulePrefetch(BaseCPU *cpu);
+    void prefetchNext(BaseCPU *cpu);
+    void sendPrefetchReq();
+    void consumePrefetchQueue(const std::vector<RegVal> &cur_indvars);
+
+    /**
+     * Steps prefetch induction variables.
+     * @return `true` if all induction variables
+     *         are reset to initial value.
+     */
+    bool stepPrefetchIndvars();
 
   public:
     StreamEngine()

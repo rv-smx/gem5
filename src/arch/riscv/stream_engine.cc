@@ -35,8 +35,10 @@
 #include "base/bitfield.hh"
 #include "base/compiler.hh"
 #include "base/logging.hh"
+#include "cpu/base.hh"
 #include "cpu/exec_context.hh"
 #include "debug/StreamEngine.hh"
+#include "sim/eventq.hh"
 
 namespace
 {
@@ -44,6 +46,9 @@ namespace
 constexpr unsigned MAX_INDVAR_NUM = gem5::RiscvISA::IndvarRegNum;
 constexpr unsigned MAX_MEMORY_NUM = 32;
 constexpr unsigned MAX_ADDR_NUM = 4;
+
+constexpr unsigned MAX_PREF_QUEUE_ENTRIES = 16;
+constexpr unsigned MAX_PREF_QUEUE_CONSUME_ENTRIES = 2;
 
 gem5::RegVal
 applyWidthUnsigned(gem5::RegVal val, unsigned width, bool is_unsigned)
@@ -110,10 +115,130 @@ StreamEngine::addAddrConfigForLastMem(RegVal stride, unsigned dep,
 }
 
 void
+StreamEngine::schedulePrefetch(BaseCPU *cpu)
+{
+    auto event = new EventFunctionWrapper(
+        [this, cpu] { prefetchNext(cpu); }, "stream_engine", true);
+    cpu->schedule(event, cpu->clockEdge(Cycles(1))); // TODO: 0?
+}
+
+void
+StreamEngine::prefetchNext(BaseCPU *cpu)
+{
+    switch (prefetcherState) {
+      case Stopped: 
+        DPRINTF(StreamEngine, "Prefetcher stopped\n");
+        // Do not schedule the next event, just return.
+        return;
+      case Running:
+        DPRINTF(StreamEngine, "Prefetcher running\n");
+        // Send prefetch request to LSU.
+        sendPrefetchReq();
+        // Check if all memory streams are prefetched
+        if (prefetchMemStreamIdx < mems.size()) {
+            break;
+        } else {
+            prefetchMemStreamIdx = 0;
+        }
+        // Prefetch complete, update queue and state.
+        prefetchQueue.push(prefetchIndvars);
+        if (prefetchQueue.size() >= MAX_PREF_QUEUE_ENTRIES) {
+            prefetcherState = Full;
+        }
+        // Update induction variables and state.
+        if (stepPrefetchIndvars()) prefetcherState = Stopped;
+        break;
+      case Full:
+        DPRINTF(StreamEngine,
+            "Prefetcher stalled due to prefetch queue is full\n");
+        // Check if we can continue.
+        if (prefetchQueue.size() < MAX_PREF_QUEUE_ENTRIES) {
+            prefetcherState = Running;
+        }
+        break;
+      default:
+        GEM5_UNREACHABLE;
+    }
+    schedulePrefetch(cpu);
+}
+
+void
+StreamEngine::sendPrefetchReq()
+{
+    // Skip unprefetchable streams.
+    while (!mems[prefetchMemStreamIdx].prefetch) {
+        ++prefetchMemStreamIdx;
+        if (prefetchMemStreamIdx >= mems.size()) return;
+    }
+    // Get memory address for prefetch.
+    const auto &mem = mems[prefetchMemStreamIdx];
+    Addr vaddr = mem.base;
+    for (const auto &addr : mem.addrs) {
+        assert(addr.kind == SMX_KIND_IV);
+        vaddr += prefetchIndvars[addr.dep] * addr.stride;
+    }
+    // Send prefetch request.
+    // TODO
+    DPRINTF(StreamEngine, "Sent prefetch request for address 0x%llx\n",
+        vaddr);
+    // Update memory stream index, skip unprefetchable streams.
+    ++prefetchMemStreamIdx;
+    while (prefetchMemStreamIdx < mems.size() &&
+        !mems[prefetchMemStreamIdx].prefetch)
+    {
+        ++prefetchMemStreamIdx;
+    }
+}
+
+void
+StreamEngine::consumePrefetchQueue(const std::vector<RegVal> &cur_indvars)
+{
+    if (prefetcherState == Stopped) return;
+    // Check the first few entries of the prefetch queue.
+    for (unsigned i = 0; i < MAX_PREF_QUEUE_CONSUME_ENTRIES; ++i) {
+        if (prefetchQueue.empty()) break;
+        bool same = cur_indvars == prefetchQueue.front();
+        prefetchQueue.pop();
+        if (same) return;
+    }
+    // The current induction variables and the first few entries
+    // of the queue are not the same, clear the queue and
+    // reset induction variables.
+    while (!prefetchQueue.empty()) prefetchQueue.pop();
+    prefetchIndvars = cur_indvars;
+    prefetchMemStreamIdx = 0;
+    DPRINTF(StreamEngine, "Prefetch queue cleared and indvars reset\n");
+}
+
+bool
+StreamEngine::stepPrefetchIndvars()
+{
+    unsigned id = ivs.size() - 1;
+    for (auto it = prefetchIndvars.rbegin();
+        it != prefetchIndvars.rend(); ++it, --id)
+    {
+        const auto &iv = ivs[id];
+        *it = applyWidthUnsigned(*it + iv.stepVal, iv.width,
+            iv.isUnsigned);
+        if (isNotInLoop(id, *it)) {
+            *it = iv.initVal;
+            if (!id) return true;
+        } else {
+            break;
+        }
+    }
+    return false;
+}
+
+void
 StreamEngine::clear()
 {
     ivs.clear();
     mems.clear();
+    prefetcherState = Stopped;
+    prefetchIndvars.clear();
+    prefetchMemStreamIdx = 0;
+    while (!prefetchQueue.empty()) prefetchQueue.pop();
 }
 
 void
@@ -191,7 +316,11 @@ StreamEngine::ready(ExecContext *xc, const SmxOp *op)
     }
     for (unsigned i = 0; i < ivs.size(); ++i) {
         setIndvarDestReg(xc, op, i, ivs[i].initVal);
+        prefetchIndvars.push_back(ivs[i].initVal);
     }
+    prefetcherState = Running;
+    auto cpu = xc->tcBase()->getCpuPtr();
+    schedulePrefetch(cpu);
     DPRINTF(StreamEngine, "Stream memory access is ready\n");
     return true;
 }
@@ -207,26 +336,37 @@ StreamEngine::end()
 RegVal
 StreamEngine::step(ExecContext *xc, const SmxOp *op, unsigned indvar_id)
 {
+    // Update induction variable registers.
+    std::vector<RegVal> cur_indvars;
     RegVal ret = 0;
     for (unsigned id = 0; id < ivs.size(); ++id) {
         auto &iv = ivs[id];
         auto value = getIndvarSrcReg(xc, op, id);
+        // Record current value of all induction variables.
+        if (id <= indvar_id) {
+            cur_indvars.push_back(value);
+        } else {
+            cur_indvars.push_back(iv.initVal);
+        }
+        // Update induction variable registers.
         if (id < indvar_id) {
-            // no change in value
+            // No change in value.
             value = value;
         } else if (id == indvar_id) {
-            // step the current induction variable
+            // Step the current induction variable.
             value = applyWidthUnsigned(value + iv.stepVal, iv.width,
                 iv.isUnsigned);
             ret = value;
         } else {
-            // reset to initial value
+            // Reset to initial value.
             value = iv.initVal;
         }
         setIndvarDestReg(xc, op, id, value);
         DPRINTF(StreamEngine, "Updated induction variable stream %u = %llu\n",
             id, value);
     }
+    // Update prefetch queue.
+    consumePrefetchQueue(cur_indvars);
     return ret;
 }
 
@@ -287,11 +427,7 @@ StreamEngine::getMemoryAddr(ExecContext *xc, const SmxOp *op,
     Addr vaddr = mem.base;
     for (const auto &addr : mem.addrs) {
         assert(addr.kind == SMX_KIND_IV);
-        auto dep_value = getIndvarSrcReg(xc, op, addr.dep);
-        auto factor = dep_value * addr.stride;
-        vaddr += factor;
-        DPRINTF(StreamEngine, "Factor (dep=%llu) * (stride=%llu) = %llu\n",
-            dep_value, addr.stride, factor);
+        vaddr += getIndvarSrcReg(xc, op, addr.dep) * addr.stride;
     }
     DPRINTF(StreamEngine, "Got memory address 0x%llx from stream %u\n",
         vaddr, memory_id);
