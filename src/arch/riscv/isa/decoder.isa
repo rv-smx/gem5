@@ -462,7 +462,7 @@ decode QUADRANT default Unknown::unknown() {
                     }
                 }}, IsNonSpeculative, IsSerializeAfter);
                 0x01: SmxOp::smx_end({{
-                    if (!se.end()) {
+                    if (!se.end(xc)) {
                         return std::make_shared<IllegalInstFault>(
                                 "stream engine can not end", machInst);
                     }
