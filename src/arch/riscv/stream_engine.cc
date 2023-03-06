@@ -30,15 +30,19 @@
 
 #include <cassert>
 #include <cstdint>
+#include <sstream>
 
+#include "arch/riscv/isa.hh"
 #include "arch/riscv/regs/int.hh"
 #include "base/bitfield.hh"
 #include "base/compiler.hh"
 #include "base/logging.hh"
 #include "cpu/base.hh"
 #include "cpu/exec_context.hh"
+#include "cpu/o3/dyn_inst.hh"
 #include "debug/StreamEngine.hh"
 #include "sim/eventq.hh"
+#include "sim/probe/probe.hh"
 
 namespace
 {
@@ -48,7 +52,30 @@ constexpr unsigned MAX_MEMORY_NUM = 32;
 constexpr unsigned MAX_ADDR_NUM = 4;
 
 constexpr unsigned MAX_PREF_QUEUE_ENTRIES = 16;
+constexpr unsigned NUM_REQS_PER_PREF = 2;
 constexpr unsigned MAX_PREF_QUEUE_CONSUME_ENTRIES = 2;
+
+/**
+ * Listener for O3 CPU commit events.
+ */
+class CommitProbeListener
+    : public gem5::ProbeListenerArgBase<gem5::o3::DynInstPtr>
+{
+    using ProbeListenerArgBase::ProbeListenerArgBase;
+
+    void
+    notify(const gem5::o3::DynInstPtr &inst) override
+    {
+        auto isa = inst->tcBase()->getIsaPtr();
+        auto &se = static_cast<gem5::RiscvISA::ISA *>(isa)->streamEngine();
+        auto op = dynamic_cast<gem5::RiscvISA::SmxOp *>(
+            inst->staticInst.get());
+        if (!op) return;
+
+        if (op->getName().rfind("smx_step", 0) == 0)
+            return se.commitStep(inst.get(), op);
+    }
+};
 
 gem5::RegVal
 applyWidthUnsigned(gem5::RegVal val, unsigned width, bool is_unsigned)
@@ -65,6 +92,17 @@ applyWidthUnsigned(gem5::RegVal val, unsigned width, bool is_unsigned)
       default:
         GEM5_UNREACHABLE;
     }
+}
+
+std::string
+indvarsToString(const std::vector<gem5::RegVal> &indvars)
+{
+    std::ostringstream oss;
+    for (unsigned i = 0; i < indvars.size(); ++i) {
+        if (i) oss << ", ";
+        oss << indvars[i];
+    }
+    return oss.str();
 }
 
 } // namespace
@@ -119,7 +157,7 @@ StreamEngine::schedulePrefetch(BaseCPU *cpu)
 {
     auto event = new EventFunctionWrapper(
         [this, cpu] { prefetchNext(cpu); }, "stream_engine", true);
-    cpu->schedule(event, cpu->clockEdge(Cycles(1))); // TODO: 0?
+    cpu->schedule(event, cpu->clockEdge(Cycles(1)));
 }
 
 void
@@ -166,48 +204,61 @@ void
 StreamEngine::sendPrefetchReq()
 {
     // Skip unprefetchable streams.
-    while (!mems[prefetchMemStreamIdx].prefetch) {
-        ++prefetchMemStreamIdx;
-        if (prefetchMemStreamIdx >= mems.size()) return;
-    }
-    // Get memory address for prefetch.
-    const auto &mem = mems[prefetchMemStreamIdx];
-    Addr vaddr = mem.base;
-    for (const auto &addr : mem.addrs) {
-        assert(addr.kind == SMX_KIND_IV);
-        vaddr += prefetchIndvars[addr.dep] * addr.stride;
-    }
-    // Send prefetch request.
-    // TODO
-    DPRINTF(StreamEngine, "Sent prefetch request for address 0x%llx\n",
-        vaddr);
-    // Update memory stream index, skip unprefetchable streams.
-    ++prefetchMemStreamIdx;
-    while (prefetchMemStreamIdx < mems.size() &&
-        !mems[prefetchMemStreamIdx].prefetch)
+    while (!mems[prefetchMemStreamIdx].prefetch) ++prefetchMemStreamIdx;
+
+    for (unsigned i = 0;
+        i < NUM_REQS_PER_PREF && prefetchMemStreamIdx < mems.size();
+        ++i)
     {
+        // Get memory address for prefetch.
+        const auto &mem = mems[prefetchMemStreamIdx];
+        Addr vaddr = mem.base;
+        for (const auto &addr : mem.addrs) {
+            assert(addr.kind == SMX_KIND_IV);
+            vaddr += prefetchIndvars[addr.dep] * addr.stride;
+        }
+        // Send prefetch request.
+        // TODO
+        DPRINTF(StreamEngine, "Sent prefetch request for address 0x%llx\n",
+            vaddr);
+        // Update memory stream index, skip unprefetchable streams.
         ++prefetchMemStreamIdx;
+        while (prefetchMemStreamIdx < mems.size() &&
+            !mems[prefetchMemStreamIdx].prefetch)
+        {
+            ++prefetchMemStreamIdx;
+        }
     }
 }
 
 void
-StreamEngine::consumePrefetchQueue(const std::vector<RegVal> &cur_indvars)
+StreamEngine::consumePrefetchQueue(const std::vector<RegVal> &indvars)
 {
     if (prefetcherState == Stopped) return;
     // Check the first few entries of the prefetch queue.
     for (unsigned i = 0; i < MAX_PREF_QUEUE_CONSUME_ENTRIES; ++i) {
         if (prefetchQueue.empty()) break;
-        bool same = cur_indvars == prefetchQueue.front();
+        if (indvars == prefetchQueue.front()) {
+            std::string s;
+            DPRINTF(StreamEngine,
+                "Consumed prefetch queue entry before indvars=(%s)\n",
+                (s = indvarsToString(indvars)).c_str());
+            return;
+        }
         prefetchQueue.pop();
-        if (same) return;
     }
     // The current induction variables and the first few entries
     // of the queue are not the same, clear the queue and
     // reset induction variables.
     while (!prefetchQueue.empty()) prefetchQueue.pop();
-    prefetchIndvars = cur_indvars;
+    prefetchIndvars = indvars;
     prefetchMemStreamIdx = 0;
-    DPRINTF(StreamEngine, "Prefetch queue cleared and indvars reset\n");
+    {
+        std::string s;
+        DPRINTF(StreamEngine, "Prefetch queue cleared and indvars reset, "
+            "indvars (%s) not found\n",
+            (s = indvarsToString(indvars)).c_str());
+    }
 }
 
 bool
@@ -314,21 +365,36 @@ StreamEngine::ready(ExecContext *xc, const SmxOp *op)
         DPRINTF(StreamEngine, "No induction variable stream configured\n");
         return false;
     }
+    // Initialize induction variables.
     for (unsigned i = 0; i < ivs.size(); ++i) {
         setIndvarDestReg(xc, op, i, ivs[i].initVal);
         prefetchIndvars.push_back(ivs[i].initVal);
     }
+    // Start prefetch.
     prefetcherState = Running;
     auto cpu = xc->tcBase()->getCpuPtr();
     schedulePrefetch(cpu);
+    // Setup commit listener for O3 CPU.
+    if (dynamic_cast<o3::CPU *>(cpu)) {
+        commitListener = new CommitProbeListener(
+            cpu->getProbeManager(), "Commit");
+    }
     DPRINTF(StreamEngine, "Stream memory access is ready\n");
     return true;
 }
 
 bool
-StreamEngine::end()
+StreamEngine::end(ExecContext *xc)
 {
+    // Reset state.
     clear();
+    // Remove commit listener.
+    auto cpu = xc->tcBase()->getCpuPtr();
+    if (dynamic_cast<o3::CPU *>(cpu)) {
+        auto listener = static_cast<CommitProbeListener *>(commitListener);
+        cpu->getProbeManager()->removeListener("Commit", *listener);
+        delete listener;
+    }
     DPRINTF(StreamEngine, "Stream memory access ended\n");
     return true;
 }
@@ -336,18 +402,10 @@ StreamEngine::end()
 RegVal
 StreamEngine::step(ExecContext *xc, const SmxOp *op, unsigned indvar_id)
 {
-    // Update induction variable registers.
-    std::vector<RegVal> cur_indvars;
     RegVal ret = 0;
     for (unsigned id = 0; id < ivs.size(); ++id) {
         auto &iv = ivs[id];
         auto value = getIndvarSrcReg(xc, op, id);
-        // Record current value of all induction variables.
-        if (id <= indvar_id) {
-            cur_indvars.push_back(value);
-        } else {
-            cur_indvars.push_back(iv.initVal);
-        }
         // Update induction variable registers.
         if (id < indvar_id) {
             // No change in value.
@@ -365,8 +423,6 @@ StreamEngine::step(ExecContext *xc, const SmxOp *op, unsigned indvar_id)
         DPRINTF(StreamEngine, "Updated induction variable stream %u = %llu\n",
             id, value);
     }
-    // Update prefetch queue.
-    consumePrefetchQueue(cur_indvars);
     return ret;
 }
 
@@ -462,6 +518,36 @@ StreamEngine::isNotInLoop(unsigned indvar_id, RegVal value) const
       default:
         GEM5_UNREACHABLE;
     }
+}
+
+void
+StreamEngine::commitStep(ExecContext *xc, const SmxOp *step)
+{
+    auto indvar_id = bits(step->machInst, 19, 15);
+    // Get stepped induction variables.
+    std::vector<RegVal> indvars;
+    indvars.resize(ivs.size());
+    bool should_step = true;
+    for (unsigned id = ivs.size() - 1; id <= ivs.size() - 1; --id) {
+        auto &iv = ivs[id];
+        if (id > indvar_id) {
+            indvars[id] = iv.initVal;
+        } else {
+            auto value = getIndvarSrcReg(xc, step, id);
+            if (should_step) {
+                value = applyWidthUnsigned(value + iv.stepVal, iv.width,
+                    iv.isUnsigned);
+                if (isNotInLoop(indvar_id, value)) {
+                    value = iv.initVal;
+                } else {
+                    should_step = false;
+                }
+            }
+            indvars[id] = value;
+        }
+    }
+    // Update prefetch queue.
+    if (!should_step) consumePrefetchQueue(indvars);
 }
 
 } // namespace RiscvISA

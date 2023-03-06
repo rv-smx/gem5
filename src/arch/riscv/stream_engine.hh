@@ -117,11 +117,17 @@ class StreamEngine
     std::vector<RegVal> prefetchIndvars;
     unsigned prefetchMemStreamIdx;
     std::queue<std::vector<RegVal>> prefetchQueue;
+    void *commitListener;
 
     void schedulePrefetch(BaseCPU *cpu);
     void prefetchNext(BaseCPU *cpu);
     void sendPrefetchReq();
-    void consumePrefetchQueue(const std::vector<RegVal> &cur_indvars);
+
+    /**
+     * Called when committing `step` instructions.
+     * @param indvars Induction variables after step (must be valid).
+     */
+    void consumePrefetchQueue(const std::vector<RegVal> &indvars);
 
     /**
      * Steps prefetch induction variables.
@@ -151,7 +157,7 @@ class StreamEngine
 
     bool ready(ExecContext *xc, const SmxOp *op);
 
-    bool end();
+    bool end(ExecContext *xc);
 
     RegVal step(ExecContext *xc, const SmxOp *op, unsigned indvar_id);
 
@@ -167,6 +173,15 @@ class StreamEngine
             unsigned memory_id) const;
 
     bool isNotInLoop(unsigned indvar_id, RegVal value) const;
+
+    /**
+     * @ingroup Used by commit listener.
+     * @{
+     */
+
+    void commitStep(ExecContext *xc, const SmxOp *step);
+
+    /** @} */
 };
 
 } // namespace RiscvISA
