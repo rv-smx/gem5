@@ -163,40 +163,30 @@ StreamEngine::schedulePrefetch(BaseCPU *cpu)
 void
 StreamEngine::prefetchNext(BaseCPU *cpu)
 {
-    switch (prefetcherState) {
-      case Stopped: 
+    if (!prefetchEnable) {
         DPRINTF(StreamEngine, "Prefetcher stopped\n");
         // Do not schedule the next event, just return.
         return;
-      case Running:
+    }
+
+    if (prefetchQueue.size() >= MAX_PREF_QUEUE_ENTRIES) {
+        DPRINTF(StreamEngine,
+            "Prefetcher stalled due to prefetch queue is full\n");
+    } else {
         DPRINTF(StreamEngine, "Prefetcher running\n");
         // Send prefetch request to LSU.
         sendPrefetchReq();
         // Check if all memory streams are prefetched
-        if (prefetchMemStreamIdx < mems.size()) {
-            break;
-        } else {
+        if (prefetchMemStreamIdx >= mems.size()) {
             prefetchMemStreamIdx = 0;
+            // Prefetch complete, update queue and state.
+            prefetchQueue.push(prefetchIndvars);
+            // Update induction variables and state.
+            if (stepPrefetchIndvars()) prefetchEnable = false;
         }
-        // Prefetch complete, update queue and state.
-        prefetchQueue.push(prefetchIndvars);
-        if (prefetchQueue.size() >= MAX_PREF_QUEUE_ENTRIES) {
-            prefetcherState = Full;
-        }
-        // Update induction variables and state.
-        if (stepPrefetchIndvars()) prefetcherState = Stopped;
-        break;
-      case Full:
-        DPRINTF(StreamEngine,
-            "Prefetcher stalled due to prefetch queue is full\n");
-        // Check if we can continue.
-        if (prefetchQueue.size() < MAX_PREF_QUEUE_ENTRIES) {
-            prefetcherState = Running;
-        }
-        break;
-      default:
-        GEM5_UNREACHABLE;
     }
+
+    // Schedule for the next cycle.
     schedulePrefetch(cpu);
 }
 
@@ -234,7 +224,7 @@ StreamEngine::sendPrefetchReq()
 void
 StreamEngine::consumePrefetchQueue(const std::vector<RegVal> &indvars)
 {
-    if (prefetcherState == Stopped) return;
+    if (!prefetchEnable) return;
     // Check the first few entries of the prefetch queue.
     for (unsigned i = 0; i < MAX_PREF_QUEUE_CONSUME_ENTRIES; ++i) {
         if (prefetchQueue.empty()) break;
@@ -286,7 +276,7 @@ StreamEngine::clear()
 {
     ivs.clear();
     mems.clear();
-    prefetcherState = Stopped;
+    prefetchEnable = false;
     prefetchIndvars.clear();
     prefetchMemStreamIdx = 0;
     while (!prefetchQueue.empty()) prefetchQueue.pop();
@@ -371,7 +361,7 @@ StreamEngine::ready(ExecContext *xc, const SmxOp *op)
         prefetchIndvars.push_back(ivs[i].initVal);
     }
     // Start prefetch.
-    prefetcherState = Running;
+    prefetchEnable = true;
     auto cpu = xc->tcBase()->getCpuPtr();
     schedulePrefetch(cpu);
     // Setup commit listener for O3 CPU.

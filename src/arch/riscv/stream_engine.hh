@@ -106,14 +106,7 @@ class StreamEngine
     bool addAddrConfigForLastMem(RegVal stride, unsigned dep,
             SmxStreamKind kind);
 
-    enum PrefetcherState
-    {
-        Stopped,
-        Running,
-        Full,
-    };
-
-    PrefetcherState prefetcherState;
+    bool prefetchEnable;
     std::vector<RegVal> prefetchIndvars;
     unsigned prefetchMemStreamIdx;
     std::queue<std::vector<RegVal>> prefetchQueue;
