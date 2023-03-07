@@ -423,6 +423,11 @@ StreamEngine::step(ExecContext *xc, const SmxOp *op, unsigned indvar_id)
         DPRINTF(StreamEngine, "Updated induction variable stream %u = %llu\n",
             id, value);
     }
+    // Update prefetch queue if the current CPU is not O3
+    // (i.e. not speculating).
+    if (!dynamic_cast<o3::CPU *>(xc->tcBase()->getCpuPtr())) {
+        commitStep(xc, op);
+    }
     return ret;
 }
 
