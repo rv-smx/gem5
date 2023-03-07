@@ -32,13 +32,14 @@
 #include <cstdint>
 #include <sstream>
 
+#include "arch/generic/mmu.hh"
 #include "arch/riscv/isa.hh"
 #include "arch/riscv/regs/int.hh"
 #include "base/bitfield.hh"
 #include "base/compiler.hh"
 #include "base/logging.hh"
-#include "cpu/base.hh"
 #include "cpu/exec_context.hh"
+#include "cpu/thread_context.hh"
 #include "cpu/o3/dyn_inst.hh"
 #include "debug/StreamEngine.hh"
 #include "sim/eventq.hh"
@@ -47,29 +48,32 @@
 namespace
 {
 
-constexpr unsigned MAX_INDVAR_NUM = gem5::RiscvISA::IndvarRegNum;
+using namespace gem5;
+
+constexpr unsigned MAX_INDVAR_NUM = RiscvISA::IndvarRegNum;
 constexpr unsigned MAX_MEMORY_NUM = 32;
 constexpr unsigned MAX_ADDR_NUM = 4;
 
 constexpr unsigned MAX_PREF_QUEUE_ENTRIES = 16;
 constexpr unsigned NUM_REQS_PER_PREF = 2;
+constexpr unsigned MAX_PREF_REQ_QUEUE_ENTRIES =
+    MAX_PREF_QUEUE_ENTRIES * NUM_REQS_PER_PREF;
 constexpr unsigned MAX_PREF_QUEUE_CONSUME_ENTRIES = 2;
 
 /**
  * Listener for O3 CPU commit events.
  */
-class CommitProbeListener
-    : public gem5::ProbeListenerArgBase<gem5::o3::DynInstPtr>
+class CommitProbeListener : public ProbeListenerArgBase<o3::DynInstPtr>
 {
+  public:
     using ProbeListenerArgBase::ProbeListenerArgBase;
 
     void
-    notify(const gem5::o3::DynInstPtr &inst) override
+    notify(const o3::DynInstPtr &inst) override
     {
         auto isa = inst->tcBase()->getIsaPtr();
-        auto &se = static_cast<gem5::RiscvISA::ISA *>(isa)->streamEngine();
-        auto op = dynamic_cast<gem5::RiscvISA::SmxOp *>(
-            inst->staticInst.get());
+        auto &se = static_cast<RiscvISA::ISA *>(isa)->streamEngine();
+        auto op = dynamic_cast<RiscvISA::SmxOp *>(inst->staticInst.get());
         if (!op) return;
 
         if (op->getName().rfind("smx_step", 0) == 0)
@@ -77,16 +81,41 @@ class CommitProbeListener
     }
 };
 
-gem5::RegVal
-applyWidthUnsigned(gem5::RegVal val, unsigned width, bool is_unsigned)
+/**
+ * Address translation request.
+ */
+class AddrTranslationReq : public BaseMMU::Translation
+{
+  public:
+    AddrTranslationReq(unsigned _reqId) : reqId(_reqId) {}
+
+    void markDelayed() override { /* Nothing to do. */ }
+
+    void
+    finish(const Fault &fault, const RequestPtr &req,
+        ThreadContext *tc, BaseMMU::Mode mode)
+    {
+        auto isa = static_cast<RiscvISA::ISA *>(tc->getIsaPtr());
+        auto &se = isa->streamEngine();
+
+        // Tell stream engine to update request's state.
+        se.finishAddrTranslation(reqId, fault != NoFault);
+    }
+
+  private:
+    unsigned reqId;
+};
+
+RegVal
+applyWidthUnsigned(RegVal val, unsigned width, bool is_unsigned)
 {
     switch (width) {
       case 0b00:
-        return is_unsigned ? gem5::bits(val, 7, 0) : gem5::szext<8>(val);
+        return is_unsigned ? bits(val, 7, 0) : szext<8>(val);
       case 0b01:
-        return is_unsigned ? gem5::bits(val, 15, 0) : gem5::szext<16>(val);
+        return is_unsigned ? bits(val, 15, 0) : szext<16>(val);
       case 0b10:
-        return is_unsigned ? gem5::bits(val, 31, 0) : gem5::szext<32>(val);
+        return is_unsigned ? bits(val, 31, 0) : szext<32>(val);
       case 0b11:
         return val;
       default:
@@ -95,7 +124,7 @@ applyWidthUnsigned(gem5::RegVal val, unsigned width, bool is_unsigned)
 }
 
 std::string
-indvarsToString(const std::vector<gem5::RegVal> &indvars)
+indvarsToString(const std::vector<RegVal> &indvars)
 {
     std::ostringstream oss;
     for (unsigned i = 0; i < indvars.size(); ++i) {
@@ -153,15 +182,16 @@ StreamEngine::addAddrConfigForLastMem(RegVal stride, unsigned dep,
 }
 
 void
-StreamEngine::schedulePrefetch(BaseCPU *cpu)
+StreamEngine::schedulePrefetch(ThreadContext *tc)
 {
     auto event = new EventFunctionWrapper(
-        [this, cpu] { prefetchNext(cpu); }, "stream_engine", true);
+        [this, tc] { prefetchNext(tc); }, "stream_engine", true);
+    auto cpu = tc->getCpuPtr();
     cpu->schedule(event, cpu->clockEdge(Cycles(1)));
 }
 
 void
-StreamEngine::prefetchNext(BaseCPU *cpu)
+StreamEngine::prefetchNext(ThreadContext *tc)
 {
     if (!prefetchEnable) {
         DPRINTF(StreamEngine, "Prefetcher stopped\n");
@@ -169,13 +199,20 @@ StreamEngine::prefetchNext(BaseCPU *cpu)
         return;
     }
 
+    // Remove finished prefetch requests.
+    while (!requestQueue.empty() &&
+        requestQueue.front().state == Finished) {
+        requestQueue.pop_front();
+    }
+
+    // Update prefetch queue.
     if (prefetchQueue.size() >= MAX_PREF_QUEUE_ENTRIES) {
         DPRINTF(StreamEngine,
             "Prefetcher stalled due to prefetch queue is full\n");
     } else {
         DPRINTF(StreamEngine, "Prefetcher running\n");
         // Send prefetch request to LSU.
-        sendPrefetchReq();
+        enqueuePrefetchReq(tc);
         // Check if all memory streams are prefetched
         if (prefetchMemStreamIdx >= mems.size()) {
             prefetchMemStreamIdx = 0;
@@ -186,12 +223,19 @@ StreamEngine::prefetchNext(BaseCPU *cpu)
         }
     }
 
+    // Update request queue.
+    for (unsigned i = 0;
+        i < NUM_REQS_PER_PREF && i < requestQueue.size(); ++i)
+    {
+        handlePrefetchReq(tc, i);
+    }
+
     // Schedule for the next cycle.
-    schedulePrefetch(cpu);
+    schedulePrefetch(tc);
 }
 
 void
-StreamEngine::sendPrefetchReq()
+StreamEngine::enqueuePrefetchReq(ThreadContext *tc)
 {
     // Skip unprefetchable streams.
     while (!mems[prefetchMemStreamIdx].prefetch) ++prefetchMemStreamIdx;
@@ -200,6 +244,13 @@ StreamEngine::sendPrefetchReq()
         i < NUM_REQS_PER_PREF && prefetchMemStreamIdx < mems.size();
         ++i)
     {
+        // Check if we can enqueue new request.
+        if (requestQueue.size() >= MAX_PREF_REQ_QUEUE_ENTRIES) {
+            DPRINTF(StreamEngine, "Can not enqueue prefetch request "
+                "due to request queue full\n");
+            return;
+        }
+
         // Get memory address for prefetch.
         const auto &mem = mems[prefetchMemStreamIdx];
         Addr vaddr = mem.base;
@@ -207,10 +258,15 @@ StreamEngine::sendPrefetchReq()
             assert(addr.kind == SMX_KIND_IV);
             vaddr += prefetchIndvars[addr.dep] * addr.stride;
         }
-        // Send prefetch request.
-        // TODO
-        DPRINTF(StreamEngine, "Sent prefetch request for address 0x%llx\n",
-            vaddr);
+
+        // Enqueue prefetch request.
+        auto request = std::make_shared<Request>(
+            vaddr, 1 << mem.width, Request::PREFETCH,
+            tc->getCpuPtr()->dataRequestorId(), -1, -1);
+        requestQueue.push_back({Ready, std::move(request)});
+        DPRINTF(StreamEngine,
+            "Enqueued prefetch request for address 0x%llx\n", vaddr);
+
         // Update memory stream index, skip unprefetchable streams.
         ++prefetchMemStreamIdx;
         while (prefetchMemStreamIdx < mems.size() &&
@@ -218,6 +274,27 @@ StreamEngine::sendPrefetchReq()
         {
             ++prefetchMemStreamIdx;
         }
+    }
+}
+
+void
+StreamEngine::handlePrefetchReq(ThreadContext *tc, unsigned req_id)
+{
+    auto &req = requestQueue[req_id];
+    switch (req.state) {
+      case Ready: {
+        // Send address translation request to MMU.
+        auto trans = new AddrTranslationReq(req_id);
+        tc->getMMUPtr()->translateTiming(
+            req.request, tc, trans, BaseMMU::Read);
+        break;
+      }
+      case Pending:
+        // Wait for the callback to do the rest things.
+        break;
+      case Finished:
+      default:
+        GEM5_UNREACHABLE;
     }
 }
 
@@ -280,6 +357,7 @@ StreamEngine::clear()
     prefetchIndvars.clear();
     prefetchMemStreamIdx = 0;
     while (!prefetchQueue.empty()) prefetchQueue.pop();
+    requestQueue.clear();
 }
 
 void
@@ -362,10 +440,9 @@ StreamEngine::ready(ExecContext *xc, const SmxOp *op)
     }
     // Start prefetch.
     prefetchEnable = true;
-    auto cpu = xc->tcBase()->getCpuPtr();
-    schedulePrefetch(cpu);
+    schedulePrefetch(xc->tcBase());
     // Setup commit listener for O3 CPU.
-    if (dynamic_cast<o3::CPU *>(cpu)) {
+    if (auto cpu = dynamic_cast<o3::CPU *>(xc->tcBase()->getCpuPtr())) {
         commitListener = new CommitProbeListener(
             cpu->getProbeManager(), "Commit");
     }
@@ -543,6 +620,29 @@ StreamEngine::commitStep(ExecContext *xc, const SmxOp *step)
     }
     // Update prefetch queue.
     if (!should_step) consumePrefetchQueue(indvars);
+}
+
+void
+StreamEngine::finishAddrTranslation(unsigned req_id, bool has_fault)
+{
+    auto &req = requestQueue[req_id];
+
+    // Ignore any kind of faults.
+    if (has_fault) {
+        DPRINTF(StreamEngine,
+            "Address translation for vaddr=0x%llx has fault, ignored\n",
+            req.request->getVaddr());
+        req.state = Finished;
+        return;
+    }
+
+    // Send load request to cache.
+    DPRINTF(StreamEngine,
+        "Address translation vaddr=0x%llx -> paddr=0x%llx done, "
+        "sending load request to cache\n",
+        req.request->getVaddr(), req.request->getPaddr());
+    // TODO
+    req.state = Finished;
 }
 
 } // namespace RiscvISA

@@ -29,18 +29,20 @@
 #ifndef __ARCH_RISCV_STREAM_ENGINE_HH__
 #define __ARCH_RISCV_STREAM_ENGINE_HH__
 
+#include <deque>
 #include <queue>
 #include <vector>
 
 #include "arch/riscv/insts/smx.hh"
 #include "base/types.hh"
+#include "mem/request.hh"
 #include "sim/serialize.hh"
 
 namespace gem5
 {
 
 class ExecContext;
-class BaseCPU;
+class ThreadContext;
 
 namespace RiscvISA
 {
@@ -106,15 +108,30 @@ class StreamEngine
     bool addAddrConfigForLastMem(RegVal stride, unsigned dep,
             SmxStreamKind kind);
 
+    enum RequestState
+    {
+        Ready,
+        Pending,
+        Finished,
+    };
+
+    struct PrefetchRequest
+    {
+        RequestState state;
+        RequestPtr request;
+    };
+
     bool prefetchEnable;
     std::vector<RegVal> prefetchIndvars;
     unsigned prefetchMemStreamIdx;
     std::queue<std::vector<RegVal>> prefetchQueue;
+    std::deque<PrefetchRequest> requestQueue;
     void *commitListener;
 
-    void schedulePrefetch(BaseCPU *cpu);
-    void prefetchNext(BaseCPU *cpu);
-    void sendPrefetchReq();
+    void schedulePrefetch(ThreadContext *tc);
+    void prefetchNext(ThreadContext *tc);
+    void enqueuePrefetchReq(ThreadContext *tc);
+    void handlePrefetchReq(ThreadContext *tc, unsigned req_id);
 
     /**
      * Called when committing `step` instructions.
@@ -173,6 +190,15 @@ class StreamEngine
      */
 
     void commitStep(ExecContext *xc, const SmxOp *step);
+
+    /** @} */
+
+    /**
+     * @ingroup Used by prefetch requests.
+     * @{
+     */
+
+    void finishAddrTranslation(unsigned req_id, bool has_fault);
 
     /** @} */
 };
