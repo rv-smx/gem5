@@ -81,7 +81,7 @@ def template SmxCfgIvDisasm {{
             Addr pc, const loader::SymbolTable *symtab) const
     {
         std::stringstream ss;
-        ss << "smx.cfg.iv.";
+        ss << "smx_cfg_iv_";
         switch (FUNCT2) {
           case 0b00:
             ss << 'b';
