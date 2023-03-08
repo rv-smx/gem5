@@ -112,6 +112,7 @@ class StreamEngine
     {
         Ready,
         Pending,
+        Retrying,
         Finished,
     };
 
@@ -127,6 +128,7 @@ class StreamEngine
     std::queue<std::vector<RegVal>> prefetchQueue;
     std::deque<PrefetchRequest> requestQueue;
     void *commitListener;
+    void *memChannelInjector;
 
     void schedulePrefetch(ThreadContext *tc);
     void prefetchNext(ThreadContext *tc);
@@ -199,6 +201,8 @@ class StreamEngine
      */
 
     void finishAddrTranslation(unsigned req_id, bool has_fault);
+
+    void finishRetry(unsigned req_id);
 
     /** @} */
 };

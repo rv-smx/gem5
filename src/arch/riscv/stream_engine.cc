@@ -31,6 +31,7 @@
 #include <cassert>
 #include <cstdint>
 #include <sstream>
+#include <utility>
 
 #include "arch/generic/mmu.hh"
 #include "arch/riscv/isa.hh"
@@ -42,6 +43,7 @@
 #include "cpu/thread_context.hh"
 #include "cpu/o3/dyn_inst.hh"
 #include "debug/StreamEngine.hh"
+#include "mem/port.hh"
 #include "sim/eventq.hh"
 #include "sim/probe/probe.hh"
 
@@ -86,6 +88,9 @@ class CommitProbeListener : public ProbeListenerArgBase<o3::DynInstPtr>
  */
 class AddrTranslationReq : public BaseMMU::Translation
 {
+  private:
+    unsigned reqId;
+
   public:
     AddrTranslationReq(unsigned _reqId) : reqId(_reqId) {}
 
@@ -101,9 +106,207 @@ class AddrTranslationReq : public BaseMMU::Translation
         // Tell stream engine to update request's state.
         se.finishAddrTranslation(reqId, fault != NoFault);
     }
+};
 
+/**
+ * Inject memory channel between CPU and cache/memory.
+ */
+class MemoryChannelInjector : public Packet::SenderState
+{
   private:
-    unsigned reqId;
+    class ChannelResponse : public ResponsePort
+    {
+      private:
+        MemoryChannelInjector &mci;
+
+      protected:
+        Tick
+        recvAtomicBackdoor(PacketPtr pkt, MemBackdoorPtr &backdoor) override
+        {
+            return mci.request.sendAtomicBackdoor(pkt, backdoor);
+        }
+
+        bool
+        tryTiming(PacketPtr pkt) override
+        {
+            return mci.request.tryTiming(pkt);
+        }
+
+        bool
+        recvTimingSnoopResp(PacketPtr pkt) override
+        {
+            return mci.request.sendTimingSnoopResp(pkt);
+        }
+
+        Tick
+        recvAtomic(PacketPtr pkt) override
+        {
+            return mci.request.sendAtomic(pkt);
+        }
+
+        bool
+        recvTimingReq(PacketPtr pkt) override
+        {
+            return mci.request.sendTimingReq(pkt);
+        }
+
+        void
+        recvRespRetry() override
+        {
+            mci.request.sendRetryResp();
+        }
+
+        void
+        recvFunctional(PacketPtr pkt) override
+        {
+            mci.request.sendFunctional(pkt);
+        }
+
+      public:
+        ChannelResponse(MemoryChannelInjector &_mci)
+            : ResponsePort("stream_engine.mci.response", nullptr),
+                mci(_mci)
+        {
+        }
+
+        AddrRangeList
+        getAddrRanges() const override
+        {
+            return mci.request.getAddrRanges();
+        }
+    };
+
+    friend ChannelResponse;
+
+    class ChannelRequest : public RequestPort
+    {
+      private:
+        MemoryChannelInjector &mci;
+
+      protected:
+        void
+        recvRangeChange() override
+        {
+            mci.response.sendRangeChange();
+        }
+
+        Tick
+        recvAtomicSnoop(PacketPtr pkt) override
+        {
+            return mci.response.sendAtomicSnoop(pkt);
+        }
+
+        void
+        recvFunctionalSnoop(PacketPtr pkt) override
+        {
+            mci.response.sendFunctionalSnoop(pkt);
+        }
+
+        void
+        recvTimingSnoopReq(PacketPtr pkt) override
+        {
+            mci.response.sendTimingSnoopReq(pkt);
+        }
+
+        void
+        recvRetrySnoopResp() override
+        {
+            mci.response.sendRetrySnoopResp();
+        }
+
+        bool
+        recvTimingResp(PacketPtr pkt) override
+        {
+            if (pkt->senderState ==
+                    static_cast<Packet::SenderState *>(&mci)) {
+                // The packet is a prefetch request, delete it.
+                delete pkt;
+                return true;
+            } else {
+                return mci.response.sendTimingResp(pkt);
+            }
+        }
+
+        void
+        recvReqRetry() override
+        {
+            mci.retryPrefetch();
+            mci.response.sendRetryReq();
+        }
+
+      public:
+        ChannelRequest(MemoryChannelInjector &_mci)
+            : RequestPort("stream_engine.mci.request", nullptr),
+                mci(_mci)
+        {
+        }
+
+        bool
+        isSnooping() const override
+        {
+            return mci.response.isSnooping();
+        }
+    };
+
+    friend ChannelRequest;
+
+    ChannelResponse response;
+    ChannelRequest request;
+    RiscvISA::StreamEngine &se;
+    RequestPort &cpuReq;
+    std::queue<std::pair<unsigned, PacketPtr>> pendingRetries;
+
+    void
+    retryPrefetch()
+    {
+        for (unsigned i = 0; i < NUM_REQS_PER_PREF; ++i) {
+            if (pendingRetries.empty()) return;
+
+            // Pick a pending packet from queue and send.
+            auto [id, packet] = pendingRetries.front();
+            if (!request.sendTimingReq(packet)) {
+                // Cache blocked, wait for next retry.
+                return;
+            } else {
+                // Inform the stream engine that retry finished.
+                se.finishRetry(id);
+                // Remove the packet from the queue.
+                pendingRetries.pop();
+            }
+        }
+    }
+
+  public:
+    MemoryChannelInjector(RiscvISA::StreamEngine &_se, RequestPort &_cpuReq)
+        : response(*this), request(*this), se(_se), cpuReq(_cpuReq)
+    {
+        auto &peer = cpuReq.getPeer();
+        cpuReq.bind(response);
+        request.bind(peer);
+    }
+
+    ~MemoryChannelInjector()
+    {
+        auto &peer = request.getPeer();
+        request.unbind();
+        cpuReq.bind(peer);
+    }
+
+    bool
+    sendPrefetchReq(unsigned req_id, const RequestPtr &req)
+    {
+        // Create a new packet.
+        auto packet = Packet::createRead(req);
+        packet->allocate();
+        packet->senderState = this;
+        // Send packet.
+        if (!request.sendTimingReq(packet)) {
+            // Failed, push to retry queue.
+            pendingRetries.push({req_id, packet});
+            return false;
+        }
+        return true;
+    }
 };
 
 RegVal
@@ -442,10 +645,14 @@ StreamEngine::ready(ExecContext *xc, const SmxOp *op)
     prefetchEnable = true;
     schedulePrefetch(xc->tcBase());
     // Setup commit listener for O3 CPU.
-    if (auto cpu = dynamic_cast<o3::CPU *>(xc->tcBase()->getCpuPtr())) {
+    auto cpu = xc->tcBase()->getCpuPtr();
+    if (dynamic_cast<o3::CPU *>(cpu)) {
         commitListener = new CommitProbeListener(
             cpu->getProbeManager(), "Commit");
     }
+    // Inject memory channel.
+    memChannelInjector = new MemoryChannelInjector(
+        *this, *dynamic_cast<RequestPort *>(&cpu->getDataPort()));
     DPRINTF(StreamEngine, "Stream memory access is ready\n");
     return true;
 }
@@ -462,6 +669,9 @@ StreamEngine::end(ExecContext *xc)
         cpu->getProbeManager()->removeListener("Commit", *listener);
         delete listener;
     }
+    // Remove memory channel injector.
+    auto mci = static_cast<MemoryChannelInjector *>(memChannelInjector);
+    delete mci;
     DPRINTF(StreamEngine, "Stream memory access ended\n");
     return true;
 }
@@ -641,8 +851,22 @@ StreamEngine::finishAddrTranslation(unsigned req_id, bool has_fault)
         "Address translation vaddr=0x%llx -> paddr=0x%llx done, "
         "sending load request to cache\n",
         req.request->getVaddr(), req.request->getPaddr());
-    // TODO
-    req.state = Finished;
+    auto mci = static_cast<MemoryChannelInjector *>(memChannelInjector);
+    if (mci->sendPrefetchReq(req_id, req.request)) {
+        req.state = Finished;
+    } else {
+        DPRINTF(StreamEngine,
+            "Load request %u failed due to cache blocked, retry pended\n",
+            req_id);
+        req.state = Retrying;
+    }
+}
+
+void
+StreamEngine::finishRetry(unsigned req_id)
+{
+    DPRINTF(StreamEngine, "Load request %u finished retry\n", req_id);
+    requestQueue[req_id].state = Finished;
 }
 
 } // namespace RiscvISA
