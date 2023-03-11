@@ -56,8 +56,8 @@ constexpr unsigned MAX_INDVAR_NUM = RiscvISA::IndvarRegNum;
 constexpr unsigned MAX_MEMORY_NUM = 32;
 constexpr unsigned MAX_ADDR_NUM = 4;
 
-constexpr unsigned MAX_PREF_QUEUE_ENTRIES = 16;
-constexpr unsigned NUM_REQS_PER_PREF = 2;
+constexpr unsigned MAX_PREF_QUEUE_ENTRIES = 64;
+constexpr unsigned NUM_REQS_PER_PREF = 8;
 constexpr unsigned MAX_PREF_REQ_QUEUE_ENTRIES =
     MAX_PREF_QUEUE_ENTRIES * NUM_REQS_PER_PREF;
 constexpr unsigned MAX_PREF_QUEUE_CONSUME_ENTRIES = 2;
