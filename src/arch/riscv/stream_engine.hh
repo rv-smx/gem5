@@ -83,7 +83,6 @@ class StreamEngine
         SmxStopCond cond;
         unsigned width;
         bool isUnsigned;
-        std::vector<unsigned> users;
     };
 
     struct AddrConfig
@@ -99,7 +98,6 @@ class StreamEngine
         bool prefetch;
         unsigned width;
         std::vector<AddrConfig> addrs;
-        std::vector<unsigned> users;
     };
 
     std::vector<IndvarConfig> ivs;

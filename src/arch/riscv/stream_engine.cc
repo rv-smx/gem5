@@ -371,10 +371,8 @@ StreamEngine::addAddrConfigForLastMem(RegVal stride, unsigned dep,
     addrs.push_back({stride, dep, kind});
     const char *kind_str;
     if (kind == SMX_KIND_IV) {
-        ivs[dep].users.push_back(memory_id);
         kind_str = "induction variable";
     } else {
-        mems[dep].users.push_back(memory_id);
         kind_str = "memory";
     }
     DPRINTF(StreamEngine,
