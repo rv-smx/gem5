@@ -598,7 +598,7 @@ StreamEngine::addIndvarConfig(RegVal _init_val, RegVal _step_val,
         "Induction variable stream %u: init=%llu, step=%llu, final=%llu\n",
         (unsigned)ivs.size(), init_val, step_val, final_val);
     ivs.push_back(
-        {init_val, step_val, final_val, cond, width, is_unsigned, {}});
+        {init_val, step_val, final_val, cond, width, is_unsigned});
     return true;
 }
 
@@ -614,7 +614,7 @@ StreamEngine::addMemoryConfig(RegVal base, RegVal stride1, unsigned dep1,
     }
     DPRINTF(StreamEngine, "Memory stream %u: base=0x%llx\n",
         (unsigned)mems.size(), base);
-    mems.push_back({base, prefetch, width, {}, {}});
+    mems.push_back({base, prefetch, width, {}});
     return addAddrConfigForLastMem(stride1, dep1, kind1);
 }
 
