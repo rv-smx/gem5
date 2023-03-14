@@ -362,15 +362,6 @@ let {{
     INDVAR_REG_NUM = 4;
 }};
 
-def format SmxOp(code, *opt_flags) {{
-    iop = InstObjParams(name, Name, 'SmxOp',
-        {'code': code, 'set_indvar_reg': ''}, opt_flags)
-    header_output = BasicDeclare.subst(iop)
-    decoder_output = SmxConstructor.subst(iop)
-    decode_block = BasicDecode.subst(iop)
-    exec_output = SmxExecute.subst(iop)
-}};
-
 def format SmxCfgIvOp(code, *opt_flags) {{
     iop = InstObjParams(name, Name, 'SmxOp',
         {'code': code, 'set_indvar_reg': ''}, opt_flags)
@@ -402,6 +393,15 @@ def format SmxReadyOp(code, *opt_flags) {{
     iop = InstObjParams(name, Name, 'SmxOp',
         {'code': code, 'set_indvar_reg': 'setIndvarDests();'}, opt_flags)
     iop.padDestRegIdx(INDVAR_REG_NUM)
+    header_output = BasicDeclare.subst(iop)
+    decoder_output = SmxConstructor.subst(iop)
+    decode_block = BasicDecode.subst(iop)
+    exec_output = SmxExecute.subst(iop)
+}};
+
+def format SmxEndOp(code, *opt_flags) {{
+    iop = InstObjParams(name, Name, 'SmxOp',
+        {'code': code, 'set_indvar_reg': ''}, opt_flags)
     header_output = BasicDeclare.subst(iop)
     decoder_output = SmxConstructor.subst(iop)
     decode_block = BasicDecode.subst(iop)

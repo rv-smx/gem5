@@ -461,7 +461,7 @@ decode QUADRANT default Unknown::unknown() {
                                 "stream engine is not ready", machInst);
                     }
                 }}, IsNonSpeculative, IsSerializeAfter);
-                0x01: SmxOp::smx_end({{
+                0x01: SmxEndOp::smx_end({{
                     if (!se.end(xc)) {
                         return std::make_shared<IllegalInstFault>(
                                 "stream engine can not end", machInst);
