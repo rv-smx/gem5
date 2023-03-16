@@ -106,6 +106,12 @@ class StreamEngine
 
     void addAddrConfigForLastMem(RegVal stride, unsigned dep,
             SmxStreamKind kind);
+    void addIndvarConfig(RegVal init_val, RegVal step_val, RegVal final_val,
+            SmxStopCond cond, unsigned width, bool is_unsigned);
+    void addMemoryConfig(RegVal base, RegVal stride1, unsigned dep1,
+            SmxStreamKind kind1, bool prefetch, unsigned width);
+    void addAddrConfig(RegVal stride1, unsigned dep1, SmxStreamKind kind1,
+            RegVal stride2, unsigned dep2, SmxStreamKind kind2);
 
     ThreadContext *tc;
     void *commitListener;
@@ -167,10 +173,18 @@ class StreamEngine
     void serialize(CheckpointOut &cp) const;
     void unserialize(CheckpointIn &cp);
 
-    bool checkIndvarConfig(SmxStopCond cond);
+    bool configIndvar(ExecContext *xc, RegVal init_val, RegVal step_val,
+            RegVal final_val, SmxStopCond cond, unsigned width,
+            bool is_unsigned);
+    void configMemory(ExecContext *xc, RegVal base, RegVal stride1,
+            unsigned dep1, SmxStreamKind kind1, bool prefetch,
+            unsigned width);
+    void configAddr(ExecContext *xc,
+            RegVal stride1, unsigned dep1, SmxStreamKind kind1,
+            RegVal stride2, unsigned dep2, SmxStreamKind kind2);
     bool ready(ExecContext *xc, const SmxOp *op, unsigned conf_num,
             bool &wait);
-
+    void end(ExecContext *xc);
     RegVal step(ExecContext *xc, const SmxOp *op, unsigned indvar_id);
 
     RegVal getIndvarSrcReg(ExecContext *xc, const SmxOp *op,

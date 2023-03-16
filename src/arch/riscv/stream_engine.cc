@@ -378,6 +378,42 @@ StreamEngine::addAddrConfigForLastMem(RegVal stride, unsigned dep,
 }
 
 void
+StreamEngine::addIndvarConfig(RegVal _init_val, RegVal _step_val,
+        RegVal _final_val, SmxStopCond cond, unsigned width, bool is_unsigned)
+{
+    auto init_val = applyWidthUnsigned(_init_val, width, is_unsigned);
+    auto step_val = applyWidthUnsigned(_step_val, width, is_unsigned);
+    auto final_val = applyWidthUnsigned(_final_val, width, is_unsigned);
+    DPRINTF(StreamEngine,
+        "Induction variable stream %u: init=%llu, step=%llu, final=%llu\n",
+        (unsigned)ivs.size(), init_val, step_val, final_val);
+    ivs.push_back(
+        {init_val, step_val, final_val, cond, width, is_unsigned});
+    ++committedConfigs;
+}
+
+void
+StreamEngine::addMemoryConfig(RegVal base, RegVal stride1, unsigned dep1,
+        SmxStreamKind kind1, bool prefetch, unsigned width)
+{
+    DPRINTF(StreamEngine, "Memory stream %u: base=0x%llx\n",
+        (unsigned)mems.size(), base);
+    mems.push_back({base, prefetch, width, {}});
+    addAddrConfigForLastMem(stride1, dep1, kind1);
+    ++committedConfigs;
+}
+
+void
+StreamEngine::addAddrConfig(
+        RegVal stride1, unsigned dep1, SmxStreamKind kind1,
+        RegVal stride2, unsigned dep2, SmxStreamKind kind2)
+{
+    addAddrConfigForLastMem(stride1, dep1, kind1);
+    if (stride2) addAddrConfigForLastMem(stride2, dep2, kind2);
+    ++committedConfigs;
+}
+
+void
 StreamEngine::removeCommitListener()
 {
     if (tc && commitListener) {
@@ -594,14 +630,43 @@ StreamEngine::unserialize(CheckpointIn &cp)
 }
 
 bool
-StreamEngine::checkIndvarConfig(SmxStopCond cond)
+StreamEngine::configIndvar(ExecContext *xc, RegVal init_val,
+        RegVal step_val, RegVal final_val, SmxStopCond cond,
+        unsigned width, bool is_unsigned)
 {
     if (cond < SMX_COND_GT || cond > SMX_COND_NE) {
         DPRINTF(StreamEngine, "Unsupported stop condition %u "
-            "for induction variable stream %u\n", cond, (unsigned)ivs.size());
+            "for induction variable stream at PC=0x%llx\n",
+            cond, xc->pcState().instAddr());
         return false;
     }
+    // Add configuration if is not O3 (i.e. not speculating).
+    if (!dynamic_cast<o3::CPU *>(xc->tcBase()->getCpuPtr())) {
+        addIndvarConfig(init_val, step_val, final_val, cond, width,
+            is_unsigned);
+    }
     return true;
+}
+
+void
+StreamEngine::configMemory(ExecContext *xc, RegVal base, RegVal stride1,
+        unsigned dep1, SmxStreamKind kind1, bool prefetch, unsigned width)
+{
+    // Add configuration if is not O3 (i.e. not speculating).
+    if (!dynamic_cast<o3::CPU *>(xc->tcBase()->getCpuPtr())) {
+        addMemoryConfig(base, stride1, dep1, kind1, prefetch, width);
+    }
+}
+
+void
+StreamEngine::configAddr(ExecContext *xc,
+        RegVal stride1, unsigned dep1, SmxStreamKind kind1,
+        RegVal stride2, unsigned dep2, SmxStreamKind kind2)
+{
+    // Add configuration if is not O3 (i.e. not speculating).
+    if (!dynamic_cast<o3::CPU *>(xc->tcBase()->getCpuPtr())) {
+        addAddrConfig(stride1, dep1, kind1, stride2, dep2, kind2);
+    }
 }
 
 bool
@@ -674,6 +739,13 @@ StreamEngine::ready(ExecContext *xc, const SmxOp *op, unsigned conf_num,
         *this, *dynamic_cast<RequestPort *>(&cpu->getDataPort()));
     DPRINTF(StreamEngine, "Stream memory access is ready\n");
     return true;
+}
+
+void
+StreamEngine::end(ExecContext *xc)
+{
+    // Add configuration if is not O3 (i.e. not speculating).
+    if (!dynamic_cast<o3::CPU *>(xc->tcBase()->getCpuPtr())) commitEnd();
 }
 
 RegVal
@@ -810,21 +882,11 @@ StreamEngine::commitIndvarConfig(ExecContext *xc, const SmxOp *op)
     auto rs2 = xc->getRegOperand(op, 1);
     auto rs3 = xc->getRegOperand(op, 2);
     auto cond = static_cast<SmxStopCond>(bits(op->machInst, 10, 7));
-    unsigned width = bits(op->machInst, 26, 25);
-    bool is_unsigned = bits(op->machInst, 11);
+    auto width = bits(op->machInst, 26, 25);
+    auto is_unsigned = bits(op->machInst, 11);
 
     // Add configuration.
-    auto init_val = applyWidthUnsigned(rs1, width, is_unsigned);
-    auto step_val = applyWidthUnsigned(rs2, width, is_unsigned);
-    auto final_val = applyWidthUnsigned(rs3, width, is_unsigned);
-    DPRINTF(StreamEngine,
-        "Induction variable stream %u: init=%llu, step=%llu, final=%llu\n",
-        (unsigned)ivs.size(), init_val, step_val, final_val);
-    ivs.push_back(
-        {init_val, step_val, final_val, cond, width, is_unsigned});
-
-    // Update committed configurations.
-    ++committedConfigs;
+    addIndvarConfig(rs1, rs2, rs3, cond, width, is_unsigned);
 }
 
 void
@@ -835,17 +897,11 @@ StreamEngine::commitMemoryConfig(ExecContext *xc, const SmxOp *op)
     auto stride1 = xc->getRegOperand(op, 1);
     auto dep1 = bits(op->machInst, 11, 7);
     auto kind1 = static_cast<SmxStreamKind>(bits(op->machInst, 25));
-    bool prefetch = bits(op->machInst, 26);
-    unsigned width = bits(op->machInst, 29, 27);
+    auto prefetch = bits(op->machInst, 26);
+    auto width = bits(op->machInst, 29, 27);
 
     // Add configuration.
-    DPRINTF(StreamEngine, "Memory stream %u: base=0x%llx\n",
-        (unsigned)mems.size(), base);
-    mems.push_back({base, prefetch, width, {}});
-    addAddrConfigForLastMem(stride1, dep1, kind1);
-
-    // Update committed configurations.
-    ++committedConfigs;
+    addMemoryConfig(base, stride1, dep1, kind1, prefetch, width);
 }
 
 void
@@ -860,11 +916,7 @@ StreamEngine::commitAddrConfig(ExecContext *xc, const SmxOp *op)
     auto kind2 = static_cast<SmxStreamKind>(bits(op->machInst, 31));
 
     // Add configuration.
-    addAddrConfigForLastMem(stride1, dep1, kind1);
-    if (stride2) addAddrConfigForLastMem(stride2, dep2, kind2);
-
-    // Update committed configurations.
-    ++committedConfigs;
+    addAddrConfig(stride1, dep1, kind1, stride2, dep2, kind2);
 }
 
 void

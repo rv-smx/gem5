@@ -433,24 +433,20 @@ decode QUADRANT default Unknown::unknown() {
 
         0x02: decode FUNCT3 {
             0x0: SmxCfgIvOp::smx_cfg_iv({{
-                if (!se.checkIndvarConfig((SmxStopCond)STOPCOND)) {
+                if (!se.configIndvar(xc, Rs1, Rs2, Rs3,
+                        (SmxStopCond)STOPCOND, FUNCT2, IVUNSIGNED)) {
                     return std::make_shared<IllegalInstFault>(
                             "invalid induction variable stream config",
                             machInst);
                 }
-                static_cast<void>(Rs1);
-                static_cast<void>(Rs2);
-                static_cast<void>(Rs3);
             }});
             0x1: SmxCfgMsOp::smx_cfg_ms({{
-                // Nothing to do, wait for commit.
-                static_cast<void>(Rs1);
-                static_cast<void>(Rs2);
+                se.configMemory(xc, Rs1, Rs2, DEP1,
+                    (SmxStreamKind)KIND1, MSPREFETCH, MSWIDTH);
             }});
             0x2: SmxCfgAddrOp::smx_cfg_addr({{
-                // Nothing to do, wait for commit.
-                static_cast<void>(Rs1);
-                static_cast<void>(Rs2);
+                se.configAddr(xc, Rs1, DEP1, (SmxStreamKind)KIND1,
+                    Rs2, DEP2, (SmxStreamKind)KIND2);
             }});
             0x3: decode FUNCT7 {
                 0x00: SmxReadyOp::smx_ready({{
@@ -466,7 +462,7 @@ decode QUADRANT default Unknown::unknown() {
                     }
                 }}, IsDirectControl, IsCondControl);
                 0x01: SmxEndOp::smx_end({{
-                    // Nothing to do, wait for commit.
+                    se.end(xc);
                 }});
             }
             0x4: decode LDSIGWIDTH {

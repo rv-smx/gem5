@@ -46,7 +46,6 @@ def template SmxExecute {{
     %(class_name)s::execute(ExecContext *xc,
         trace::InstRecord *traceData) const
     {
-        [[maybe_unused]]
         auto &se = static_cast<RiscvISA::ISA *>(xc->tcBase()->getIsaPtr())
             ->streamEngine();
 
@@ -194,7 +193,6 @@ def template SmxReadyExecute {{
     %(class_name)s::execute(ExecContext *xc,
         trace::InstRecord *traceData) const
     {
-        [[maybe_unused]]
         auto &se = static_cast<RiscvISA::ISA *>(xc->tcBase()->getIsaPtr())
             ->streamEngine();
 
@@ -247,7 +245,6 @@ def template SmxLoadExecute {{
     %(class_name)s::execute(ExecContext *xc,
         trace::InstRecord *traceData) const
     {
-        [[maybe_unused]]
         auto &se = static_cast<RiscvISA::ISA *>(xc->tcBase()->getIsaPtr())
             ->streamEngine();
 
@@ -281,7 +278,6 @@ def template SmxLoadExecute {{
     %(class_name)s::initiateAcc(ExecContext *xc,
         trace::InstRecord *traceData) const
     {
-        [[maybe_unused]]
         auto &se = static_cast<RiscvISA::ISA *>(xc->tcBase()->getIsaPtr())
             ->streamEngine();
 
@@ -323,7 +319,6 @@ def template SmxStoreExecute {{
     %(class_name)s::execute(ExecContext *xc,
         trace::InstRecord *traceData) const
     {
-        [[maybe_unused]]
         auto &se = static_cast<RiscvISA::ISA *>(xc->tcBase()->getIsaPtr())
             ->streamEngine();
 
@@ -359,7 +354,6 @@ def template SmxStoreExecute {{
     %(class_name)s::initiateAcc(ExecContext *xc,
         trace::InstRecord *traceData) const
     {
-        [[maybe_unused]]
         auto &se = static_cast<RiscvISA::ISA *>(xc->tcBase()->getIsaPtr())
             ->streamEngine();
 
