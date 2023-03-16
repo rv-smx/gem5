@@ -166,6 +166,17 @@ def template SmxCfgAddrDisasm {{
     }
 }};
 
+def template SmxReadyDisasm {{
+    std::string
+    %(class_name)s::generateDisassembly(
+            Addr pc, const loader::SymbolTable *symtab) const
+    {
+        std::stringstream ss;
+        ss << mnemonic << ' ' << CONFNUM;
+        return ss.str();
+    }
+}};
+
 def template SmxMemDeclare {{
     //
     // Static instruction class for "%(mnemonic)s".
@@ -393,10 +404,10 @@ def format SmxReadyOp(code, *opt_flags) {{
     iop = InstObjParams(name, Name, 'SmxOp',
         {'code': code, 'set_indvar_reg': 'setIndvarDests();'}, opt_flags)
     iop.padDestRegIdx(INDVAR_REG_NUM)
-    header_output = BasicDeclare.subst(iop)
+    header_output = SmxDisasmDeclare.subst(iop)
     decoder_output = SmxConstructor.subst(iop)
     decode_block = BasicDecode.subst(iop)
-    exec_output = SmxExecute.subst(iop)
+    exec_output = SmxExecute.subst(iop) + SmxReadyDisasm.subst(iop)
 }};
 
 def format SmxEndOp(code, *opt_flags) {{

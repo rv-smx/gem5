@@ -141,5 +141,6 @@ def bitfield MSPREFETCH <26>;
 def bitfield MSWIDTH    <29:27>;
 def bitfield DEP2       <30:26>;
 def bitfield KIND2      <31>;
+def bitfield CONFNUM    <21:15>;
 def bitfield LDSIGWIDTH <22:20>;
 def bitfield STWIDTH    <8:7>;
