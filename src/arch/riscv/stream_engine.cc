@@ -86,7 +86,8 @@ class CommitProbeListener : public ProbeListenerArgBase<o3::DynInstPtr>
         if (name == "smx_cfg_addr")
             return se.commitAddrConfig(inst.get(), op);
 
-        // End of streams.
+        // Hints.
+        if (name == "smx_ready") return se.commitReady(inst.get());
         if (name == "smx_end") return se.commitEnd();
 
         // Step instructions.
@@ -726,18 +727,12 @@ StreamEngine::ready(ExecContext *xc, const SmxOp *op, unsigned conf_num,
     // Initialize induction variables.
     for (unsigned i = 0; i < ivs.size(); ++i) {
         setIndvarDestReg(xc, op, i, ivs[i].initVal);
-        prefetchIndvars.push_back(ivs[i].initVal);
     }
 
-    // Start prefetch.
-    prefetchEnable = true;
-    schedulePrefetch();
-
-    // Inject memory channel.
-    auto cpu = xc->tcBase()->getCpuPtr();
-    memChannelInjector = new MemoryChannelInjector(
-        *this, *dynamic_cast<RequestPort *>(&cpu->getDataPort()));
-    DPRINTF(StreamEngine, "Stream memory access is ready\n");
+    // Enable prefetch if is not O3 (i.e. not speculating).
+    if (!dynamic_cast<o3::CPU *>(xc->tcBase()->getCpuPtr())) {
+        commitReady(xc);
+    }
     return true;
 }
 
@@ -917,6 +912,28 @@ StreamEngine::commitAddrConfig(ExecContext *xc, const SmxOp *op)
 
     // Add configuration.
     addAddrConfig(stride1, dep1, kind1, stride2, dep2, kind2);
+}
+
+void
+StreamEngine::commitReady(ExecContext *xc)
+{
+    // Check if prefetch is not enabled.
+    if (prefetchEnable) return;
+
+    // Initialize prefetch induction variables.
+    for (unsigned i = 0; i < ivs.size(); ++i) {
+        prefetchIndvars.push_back(ivs[i].initVal);
+    }
+
+    // Start prefetch.
+    prefetchEnable = true;
+    schedulePrefetch();
+
+    // Inject memory channel.
+    auto cpu = xc->tcBase()->getCpuPtr();
+    memChannelInjector = new MemoryChannelInjector(
+        *this, *dynamic_cast<RequestPort *>(&cpu->getDataPort()));
+    DPRINTF(StreamEngine, "Stream memory access is ready\n");
 }
 
 void

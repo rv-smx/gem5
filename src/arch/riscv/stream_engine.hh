@@ -205,6 +205,7 @@ class StreamEngine
     void commitIndvarConfig(ExecContext *xc, const SmxOp *op);
     void commitMemoryConfig(ExecContext *xc, const SmxOp *op);
     void commitAddrConfig(ExecContext *xc, const SmxOp *op);
+    void commitReady(ExecContext *xc);
     void commitEnd();
     void commitStep(ExecContext *xc, const SmxOp *op);
 
