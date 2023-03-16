@@ -76,8 +76,21 @@ class CommitProbeListener : public ProbeListenerArgBase<o3::DynInstPtr>
         auto &se = static_cast<RiscvISA::ISA *>(isa)->streamEngine();
         auto op = dynamic_cast<RiscvISA::SmxOp *>(inst->staticInst.get());
         if (!op) return;
+        auto name = op->getName();
 
-        if (op->getName().rfind("smx_step", 0) == 0)
+        // Configurations.
+        if (name == "smx_cfg_iv")
+            return se.commitIndvarConfig(inst.get(), op);
+        if (name == "smx_cfg_ms")
+            return se.commitMemoryConfig(inst.get(), op);
+        if (name == "smx_cfg_addr")
+            return se.commitAddrConfig(inst.get(), op);
+
+        // End of streams.
+        if (name == "smx_end") return se.commitEnd();
+
+        // Step instructions.
+        if (name.rfind("smx_step", 0) == 0)
             return se.commitStep(inst.get(), op);
     }
 };
@@ -344,28 +357,12 @@ namespace gem5
 namespace RiscvISA
 {
 
-bool
+void
 StreamEngine::addAddrConfigForLastMem(RegVal stride, unsigned dep,
         SmxStreamKind kind)
 {
-    if (!isValidStream(dep, kind)) return false;
     auto &addrs = mems.back().addrs;
     unsigned memory_id = mems.size() - 1;
-
-    if (addrs.size() >= MAX_ADDR_NUM) {
-        DPRINTF(StreamEngine,
-            "Address factor number of memory stream %u exceeded! "
-            "Currently supports %u address factors\n",
-            memory_id, MAX_ADDR_NUM);
-        return false;
-    }
-    if (kind == SMX_KIND_MS) {
-        DPRINTF(StreamEngine,
-            "Try to configure indirect memory acess for memory stream %u! "
-            "Currently does not support indirect memory access\n",
-            memory_id);
-        return false;
-    }
 
     addrs.push_back({stride, dep, kind});
     const char *kind_str;
@@ -378,7 +375,6 @@ StreamEngine::addAddrConfigForLastMem(RegVal stride, unsigned dep,
         "Added address factor stride=%llu, dependents %s"
         " stream %u for memory stream %u\n",
         stride, kind_str, dep, memory_id);
-    return true;
 }
 
 void
@@ -562,6 +558,7 @@ StreamEngine::clear()
 {
     ivs.clear();
     mems.clear();
+    committedConfigs = 0;
     prefetchEnable = false;
     prefetchIndvars.clear();
     prefetchMemStreamIdx = 0;
@@ -597,89 +594,85 @@ StreamEngine::unserialize(CheckpointIn &cp)
 }
 
 bool
-StreamEngine::addIndvarConfig(RegVal _init_val, RegVal _step_val,
-        RegVal _final_val, SmxStopCond cond, unsigned width, bool is_unsigned)
+StreamEngine::checkIndvarConfig(SmxStopCond cond)
 {
-    if (ivs.size() >= MAX_INDVAR_NUM) {
-        DPRINTF(StreamEngine, "Induction variable stream number exceeded! "
-            "Currently supports %u induction variable streams\n",
-            MAX_INDVAR_NUM);
-        return false;
-    }
     if (cond < SMX_COND_GT || cond > SMX_COND_NE) {
         DPRINTF(StreamEngine, "Unsupported stop condition %u "
             "for induction variable stream %u\n", cond, (unsigned)ivs.size());
         return false;
     }
-
-    auto init_val = applyWidthUnsigned(_init_val, width, is_unsigned);
-    auto step_val = applyWidthUnsigned(_step_val, width, is_unsigned);
-    auto final_val = applyWidthUnsigned(_final_val, width, is_unsigned);
-    DPRINTF(StreamEngine,
-        "Induction variable stream %u: init=%llu, step=%llu, final=%llu\n",
-        (unsigned)ivs.size(), init_val, step_val, final_val);
-    ivs.push_back(
-        {init_val, step_val, final_val, cond, width, is_unsigned});
     return true;
 }
 
 bool
-StreamEngine::addMemoryConfig(RegVal base, RegVal stride1, unsigned dep1,
-        SmxStreamKind kind1, bool prefetch, unsigned width)
+StreamEngine::ready(ExecContext *xc, const SmxOp *op, unsigned conf_num,
+        bool &wait)
 {
-    if (mems.size() >= MAX_MEMORY_NUM) {
+    // Check committed configurations.
+    if (committedConfigs < conf_num) {
+        wait = true;
+        return true;
+    } else if (committedConfigs == conf_num) {
+        wait = false;
+    } else {
+        DPRINTF(StreamEngine, "Unmatched configuration number\n");
+        return false;
+    }
+
+    // Check configurations.
+    if (ivs.empty()) {
+        DPRINTF(StreamEngine, "No induction variable stream configured\n");
+        return false;
+    }
+    if (ivs.size() > MAX_INDVAR_NUM) {
+        DPRINTF(StreamEngine, "Induction variable stream number exceeded! "
+            "Currently supports %u induction variable streams\n",
+            MAX_INDVAR_NUM);
+        return false;
+    }
+    if (mems.size() > MAX_MEMORY_NUM) {
         DPRINTF(StreamEngine, "Memory stream number exceeded! "
             "Currently supports %u memory streams\n",
             MAX_MEMORY_NUM);
         return false;
     }
-    DPRINTF(StreamEngine, "Memory stream %u: base=0x%llx\n",
-        (unsigned)mems.size(), base);
-    mems.push_back({base, prefetch, width, {}});
-    return addAddrConfigForLastMem(stride1, dep1, kind1);
-}
-
-bool
-StreamEngine::addAddrConfig(
-        RegVal stride1, unsigned dep1, SmxStreamKind kind1,
-        RegVal stride2, unsigned dep2, SmxStreamKind kind2)
-{
-    if (!addAddrConfigForLastMem(stride1, dep1, kind1)) return false;
-    return !stride2 || addAddrConfigForLastMem(stride2, dep2, kind2);
-}
-
-bool
-StreamEngine::ready(ExecContext *xc, const SmxOp *op)
-{
-    if (ivs.empty()) {
-        DPRINTF(StreamEngine, "No induction variable stream configured\n");
-        return false;
+    for (unsigned memory_id = 0; memory_id < mems.size(); ++memory_id) {
+        const auto &addrs = mems[memory_id].addrs;
+        if (addrs.size() > MAX_ADDR_NUM) {
+            DPRINTF(StreamEngine,
+                "Address factor number of memory stream %u exceeded! "
+                "Currently supports %u address factors\n",
+                memory_id, MAX_ADDR_NUM);
+            return false;
+        }
+        for (const auto &addr : addrs) {
+            if (!isValidStream(addr.dep, addr.kind)) return false;
+            if (addr.kind == SMX_KIND_MS) {
+                DPRINTF(StreamEngine,
+                    "Try to configure indirect memory acess for "
+                    "memory stream %u! Currently does not support "
+                    "indirect memory access\n",
+                    memory_id);
+                return false;
+            }
+        }
     }
+
     // Initialize induction variables.
     for (unsigned i = 0; i < ivs.size(); ++i) {
         setIndvarDestReg(xc, op, i, ivs[i].initVal);
         prefetchIndvars.push_back(ivs[i].initVal);
     }
+
     // Start prefetch.
     prefetchEnable = true;
     schedulePrefetch();
+
     // Inject memory channel.
     auto cpu = xc->tcBase()->getCpuPtr();
     memChannelInjector = new MemoryChannelInjector(
         *this, *dynamic_cast<RequestPort *>(&cpu->getDataPort()));
     DPRINTF(StreamEngine, "Stream memory access is ready\n");
-    return true;
-}
-
-bool
-StreamEngine::end(ExecContext *xc)
-{
-    // Reset state.
-    clear();
-    // Remove memory channel injector.
-    auto mci = static_cast<MemoryChannelInjector *>(memChannelInjector);
-    delete mci;
-    DPRINTF(StreamEngine, "Stream memory access ended\n");
     return true;
 }
 
@@ -810,9 +803,85 @@ StreamEngine::isNotInLoop(unsigned indvar_id, RegVal value) const
 }
 
 void
-StreamEngine::commitStep(ExecContext *xc, const SmxOp *step)
+StreamEngine::commitIndvarConfig(ExecContext *xc, const SmxOp *op)
 {
-    auto indvar_id = bits(step->machInst, 19, 15);
+    // Read operands.
+    auto rs1 = xc->getRegOperand(op, 0);
+    auto rs2 = xc->getRegOperand(op, 1);
+    auto rs3 = xc->getRegOperand(op, 2);
+    auto cond = static_cast<SmxStopCond>(bits(op->machInst, 10, 7));
+    unsigned width = bits(op->machInst, 26, 25);
+    bool is_unsigned = bits(op->machInst, 11);
+
+    // Add configuration.
+    auto init_val = applyWidthUnsigned(rs1, width, is_unsigned);
+    auto step_val = applyWidthUnsigned(rs2, width, is_unsigned);
+    auto final_val = applyWidthUnsigned(rs3, width, is_unsigned);
+    DPRINTF(StreamEngine,
+        "Induction variable stream %u: init=%llu, step=%llu, final=%llu\n",
+        (unsigned)ivs.size(), init_val, step_val, final_val);
+    ivs.push_back(
+        {init_val, step_val, final_val, cond, width, is_unsigned});
+
+    // Update committed configurations.
+    ++committedConfigs;
+}
+
+void
+StreamEngine::commitMemoryConfig(ExecContext *xc, const SmxOp *op)
+{
+    // Read operands.
+    auto base = xc->getRegOperand(op, 0);
+    auto stride1 = xc->getRegOperand(op, 1);
+    auto dep1 = bits(op->machInst, 11, 7);
+    auto kind1 = static_cast<SmxStreamKind>(bits(op->machInst, 25));
+    bool prefetch = bits(op->machInst, 26);
+    unsigned width = bits(op->machInst, 29, 27);
+
+    // Add configuration.
+    DPRINTF(StreamEngine, "Memory stream %u: base=0x%llx\n",
+        (unsigned)mems.size(), base);
+    mems.push_back({base, prefetch, width, {}});
+    addAddrConfigForLastMem(stride1, dep1, kind1);
+
+    // Update committed configurations.
+    ++committedConfigs;
+}
+
+void
+StreamEngine::commitAddrConfig(ExecContext *xc, const SmxOp *op)
+{
+    // Read operands.
+    auto stride1 = xc->getRegOperand(op, 0);
+    auto dep1 = bits(op->machInst, 11, 7);
+    auto kind1 = static_cast<SmxStreamKind>(bits(op->machInst, 25));
+    auto stride2 = xc->getRegOperand(op, 1);
+    auto dep2 = bits(op->machInst, 30, 26);
+    auto kind2 = static_cast<SmxStreamKind>(bits(op->machInst, 31));
+
+    // Add configuration.
+    addAddrConfigForLastMem(stride1, dep1, kind1);
+    if (stride2) addAddrConfigForLastMem(stride2, dep2, kind2);
+
+    // Update committed configurations.
+    ++committedConfigs;
+}
+
+void
+StreamEngine::commitEnd()
+{
+    // Reset state.
+    clear();
+    // Remove memory channel injector.
+    auto mci = static_cast<MemoryChannelInjector *>(memChannelInjector);
+    delete mci;
+    DPRINTF(StreamEngine, "Stream memory access ended\n");
+}
+
+void
+StreamEngine::commitStep(ExecContext *xc, const SmxOp *op)
+{
+    auto indvar_id = bits(op->machInst, 19, 15);
     // Get stepped induction variables.
     std::vector<RegVal> indvars;
     indvars.resize(ivs.size());
@@ -822,7 +891,7 @@ StreamEngine::commitStep(ExecContext *xc, const SmxOp *step)
         if (id > indvar_id) {
             indvars[id] = iv.initVal;
         } else {
-            auto value = getIndvarSrcReg(xc, step, id);
+            auto value = getIndvarSrcReg(xc, op, id);
             if (should_step) {
                 value = applyWidthUnsigned(value + iv.stepVal, iv.width,
                     iv.isUnsigned);

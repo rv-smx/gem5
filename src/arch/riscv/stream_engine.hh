@@ -104,11 +104,12 @@ class StreamEngine
     std::vector<IndvarConfig> ivs;
     std::vector<MemoryConfig> mems;
 
-    bool addAddrConfigForLastMem(RegVal stride, unsigned dep,
+    void addAddrConfigForLastMem(RegVal stride, unsigned dep,
             SmxStreamKind kind);
 
     ThreadContext *tc;
     void *commitListener;
+    unsigned committedConfigs;
 
     void removeCommitListener();
 
@@ -166,32 +167,20 @@ class StreamEngine
     void serialize(CheckpointOut &cp) const;
     void unserialize(CheckpointIn &cp);
 
-    bool addIndvarConfig(RegVal init_val, RegVal step_val, RegVal final_val,
-            SmxStopCond cond, unsigned width, bool is_unsigned);
-
-    bool addMemoryConfig(RegVal base, RegVal stride1, unsigned dep1,
-            SmxStreamKind kind1, bool prefetch, unsigned width);
-
-    bool addAddrConfig(RegVal stride1, unsigned dep1, SmxStreamKind kind1,
-            RegVal stride2, unsigned dep2, SmxStreamKind kind2);
-
-    bool ready(ExecContext *xc, const SmxOp *op);
-
-    bool end(ExecContext *xc);
+    bool checkIndvarConfig(SmxStopCond cond);
+    bool ready(ExecContext *xc, const SmxOp *op, unsigned conf_num,
+            bool &wait);
 
     RegVal step(ExecContext *xc, const SmxOp *op, unsigned indvar_id);
 
     RegVal getIndvarSrcReg(ExecContext *xc, const SmxOp *op,
             unsigned indvar_id) const;
-
     void setIndvarDestReg(ExecContext *xc, const SmxOp *op,
             unsigned indvar_id, RegVal value);
 
     bool isValidStream(unsigned id, SmxStreamKind kind) const;
-
     Addr getMemoryAddr(ExecContext *xc, const SmxOp *op,
             unsigned memory_id) const;
-
     bool isNotInLoop(unsigned indvar_id, RegVal value) const;
 
     /**
@@ -199,7 +188,11 @@ class StreamEngine
      * @{
      */
 
-    void commitStep(ExecContext *xc, const SmxOp *step);
+    void commitIndvarConfig(ExecContext *xc, const SmxOp *op);
+    void commitMemoryConfig(ExecContext *xc, const SmxOp *op);
+    void commitAddrConfig(ExecContext *xc, const SmxOp *op);
+    void commitEnd();
+    void commitStep(ExecContext *xc, const SmxOp *op);
 
     /** @} */
 
@@ -209,7 +202,6 @@ class StreamEngine
      */
 
     void finishAddrTranslation(unsigned req_id, bool has_fault);
-
     void finishRetry(unsigned req_id);
 
     /** @} */

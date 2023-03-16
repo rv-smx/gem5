@@ -433,40 +433,41 @@ decode QUADRANT default Unknown::unknown() {
 
         0x02: decode FUNCT3 {
             0x0: SmxCfgIvOp::smx_cfg_iv({{
-                if (!se.addIndvarConfig(Rs1, Rs2, Rs3,
-                        (SmxStopCond)STOPCOND, FUNCT2, IVUNSIGNED)) {
+                if (!se.checkIndvarConfig((SmxStopCond)STOPCOND)) {
                     return std::make_shared<IllegalInstFault>(
                             "invalid induction variable stream config",
                             machInst);
                 }
-            }}, IsNonSpeculative, IsSerializeAfter);
+                static_cast<void>(Rs1);
+                static_cast<void>(Rs2);
+                static_cast<void>(Rs3);
+            }});
             0x1: SmxCfgMsOp::smx_cfg_ms({{
-                if (!se.addMemoryConfig(Rs1, Rs2, DEP1,
-                        (SmxStreamKind)KIND1, MSPREFETCH, MSWIDTH)) {
-                    return std::make_shared<IllegalInstFault>(
-                            "invalid memory stream config", machInst);
-                }
-            }}, IsNonSpeculative, IsSerializeAfter);
+                // Nothing to do, wait for commit.
+                static_cast<void>(Rs1);
+                static_cast<void>(Rs2);
+            }});
             0x2: SmxCfgAddrOp::smx_cfg_addr({{
-                if (!se.addAddrConfig(Rs1, DEP1, (SmxStreamKind)KIND1,
-                        Rs2, DEP2, (SmxStreamKind)KIND2)) {
-                    return std::make_shared<IllegalInstFault>(
-                            "invalid address factor", machInst);
-                }
-            }}, IsNonSpeculative, IsSerializeAfter);
+                // Nothing to do, wait for commit.
+                static_cast<void>(Rs1);
+                static_cast<void>(Rs2);
+            }});
             0x3: decode FUNCT7 {
                 0x00: SmxReadyOp::smx_ready({{
-                    if (!se.ready(xc, this)) {
+                    bool wait;
+                    if (!se.ready(xc, this, CONFNUM, wait)) {
                         return std::make_shared<IllegalInstFault>(
                                 "stream engine is not ready", machInst);
                     }
-                }}, IsNonSpeculative, IsSerializeAfter);
-                0x01: SmxEndOp::smx_end({{
-                    if (!se.end(xc)) {
-                        return std::make_shared<IllegalInstFault>(
-                                "stream engine can not end", machInst);
+                    if (wait) {
+                        NPC = PC;
+                    } else {
+                        NPC = NPC;
                     }
-                }}, IsNonSpeculative, IsSerializeAfter);
+                }}, IsDirectControl, IsCondControl);
+                0x01: SmxEndOp::smx_end({{
+                    // Nothing to do, wait for commit.
+                }});
             }
             0x4: decode LDSIGWIDTH {
                 format SmxLoadOp {
