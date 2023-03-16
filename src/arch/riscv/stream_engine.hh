@@ -36,6 +36,7 @@
 #include "arch/riscv/insts/smx.hh"
 #include "base/types.hh"
 #include "mem/request.hh"
+#include "sim/eventq.hh"
 #include "sim/serialize.hh"
 
 namespace gem5
@@ -106,6 +107,11 @@ class StreamEngine
     bool addAddrConfigForLastMem(RegVal stride, unsigned dep,
             SmxStreamKind kind);
 
+    ThreadContext *tc;
+    void *commitListener;
+
+    void removeCommitListener();
+
     enum RequestState
     {
         Ready,
@@ -125,13 +131,13 @@ class StreamEngine
     unsigned prefetchMemStreamIdx;
     std::queue<std::vector<RegVal>> prefetchQueue;
     std::deque<PrefetchRequest> requestQueue;
-    void *commitListener;
+    EventFunctionWrapper prefetchEvent;
     void *memChannelInjector;
 
-    void schedulePrefetch(ThreadContext *tc);
-    void prefetchNext(ThreadContext *tc);
-    void enqueuePrefetchReq(ThreadContext *tc);
-    void handlePrefetchReq(ThreadContext *tc, unsigned req_id);
+    void schedulePrefetch();
+    void prefetchNext();
+    void enqueuePrefetchReq();
+    void handlePrefetchReq(unsigned req_id);
 
     /**
      * Called when committing `step` instructions.
@@ -148,11 +154,15 @@ class StreamEngine
 
   public:
     StreamEngine()
+        : tc(nullptr), commitListener(nullptr),
+            prefetchEvent([this] { prefetchNext(); }, "stream_engine")
     {
         clear();
     }
+    ~StreamEngine() { removeCommitListener(); }
 
     void clear();
+    void initThreadContext(ThreadContext *_tc);
     void serialize(CheckpointOut &cp) const;
     void unserialize(CheckpointIn &cp);
 

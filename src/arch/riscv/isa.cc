@@ -260,6 +260,12 @@ void ISA::clear()
     _streamEngine.clear();
 }
 
+void
+ISA::startup()
+{
+    _streamEngine.initThreadContext(tc);
+}
+
 bool
 ISA::hpmCounterEnabled(int misc_reg) const
 {

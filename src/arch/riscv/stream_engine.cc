@@ -44,7 +44,6 @@
 #include "cpu/o3/dyn_inst.hh"
 #include "debug/StreamEngine.hh"
 #include "mem/port.hh"
-#include "sim/eventq.hh"
 #include "sim/probe/probe.hh"
 
 namespace
@@ -383,16 +382,25 @@ StreamEngine::addAddrConfigForLastMem(RegVal stride, unsigned dep,
 }
 
 void
-StreamEngine::schedulePrefetch(ThreadContext *tc)
+StreamEngine::removeCommitListener()
 {
-    auto event = new EventFunctionWrapper(
-        [this, tc] { prefetchNext(tc); }, "stream_engine", true);
-    auto cpu = tc->getCpuPtr();
-    cpu->schedule(event, cpu->clockEdge(Cycles(1)));
+    if (tc && commitListener) {
+        auto cpu = tc->getCpuPtr();
+        auto listener = static_cast<CommitProbeListener *>(commitListener);
+        cpu->getProbeManager()->removeListener("Commit", *listener);
+        delete listener;
+    }
 }
 
 void
-StreamEngine::prefetchNext(ThreadContext *tc)
+StreamEngine::schedulePrefetch()
+{
+    auto cpu = tc->getCpuPtr();
+    cpu->schedule(prefetchEvent, cpu->clockEdge(Cycles(1)));
+}
+
+void
+StreamEngine::prefetchNext()
 {
     if (!prefetchEnable) {
         DPRINTF(StreamEngine, "Prefetcher stopped\n");
@@ -413,7 +421,7 @@ StreamEngine::prefetchNext(ThreadContext *tc)
     } else {
         DPRINTF(StreamEngine, "Prefetcher running\n");
         // Send prefetch request to LSU.
-        enqueuePrefetchReq(tc);
+        enqueuePrefetchReq();
         // Check if all memory streams are prefetched
         if (prefetchMemStreamIdx >= mems.size()) {
             prefetchMemStreamIdx = 0;
@@ -428,15 +436,15 @@ StreamEngine::prefetchNext(ThreadContext *tc)
     for (unsigned i = 0;
         i < NUM_REQS_PER_PREF && i < requestQueue.size(); ++i)
     {
-        handlePrefetchReq(tc, i);
+        handlePrefetchReq(i);
     }
 
     // Schedule for the next cycle.
-    schedulePrefetch(tc);
+    schedulePrefetch();
 }
 
 void
-StreamEngine::enqueuePrefetchReq(ThreadContext *tc)
+StreamEngine::enqueuePrefetchReq()
 {
     // Skip unprefetchable streams.
     while (!mems[prefetchMemStreamIdx].prefetch) ++prefetchMemStreamIdx;
@@ -479,7 +487,7 @@ StreamEngine::enqueuePrefetchReq(ThreadContext *tc)
 }
 
 void
-StreamEngine::handlePrefetchReq(ThreadContext *tc, unsigned req_id)
+StreamEngine::handlePrefetchReq(unsigned req_id)
 {
     auto &req = requestQueue[req_id];
     switch (req.state) {
@@ -562,6 +570,19 @@ StreamEngine::clear()
 }
 
 void
+StreamEngine::initThreadContext(ThreadContext *_tc)
+{
+    // Update thread context.
+    tc = _tc;
+    // Create a new commit listener.
+    auto cpu = tc->getCpuPtr();
+    if (dynamic_cast<o3::CPU *>(cpu)) {
+        commitListener = new CommitProbeListener(
+            cpu->getProbeManager(), "Commit");
+    }
+}
+
+void
 StreamEngine::serialize(CheckpointOut &cp) const
 {
     // TODO
@@ -641,14 +662,9 @@ StreamEngine::ready(ExecContext *xc, const SmxOp *op)
     }
     // Start prefetch.
     prefetchEnable = true;
-    schedulePrefetch(xc->tcBase());
-    // Setup commit listener for O3 CPU.
-    auto cpu = xc->tcBase()->getCpuPtr();
-    if (dynamic_cast<o3::CPU *>(cpu)) {
-        commitListener = new CommitProbeListener(
-            cpu->getProbeManager(), "Commit");
-    }
+    schedulePrefetch();
     // Inject memory channel.
+    auto cpu = xc->tcBase()->getCpuPtr();
     memChannelInjector = new MemoryChannelInjector(
         *this, *dynamic_cast<RequestPort *>(&cpu->getDataPort()));
     DPRINTF(StreamEngine, "Stream memory access is ready\n");
@@ -660,13 +676,6 @@ StreamEngine::end(ExecContext *xc)
 {
     // Reset state.
     clear();
-    // Remove commit listener.
-    auto cpu = xc->tcBase()->getCpuPtr();
-    if (dynamic_cast<o3::CPU *>(cpu)) {
-        auto listener = static_cast<CommitProbeListener *>(commitListener);
-        cpu->getProbeManager()->removeListener("Commit", *listener);
-        delete listener;
-    }
     // Remove memory channel injector.
     auto mci = static_cast<MemoryChannelInjector *>(memChannelInjector);
     delete mci;
