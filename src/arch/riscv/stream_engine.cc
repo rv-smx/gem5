@@ -577,8 +577,9 @@ void
 StreamEngine::commitReady(ExecContext *xc)
 {
     // Check if is not ready.
-    if (isReady) return;
+    if (xc->pcState().branching()) return;
     isReady = true;
+    committedConfigs = 0;
 
     // Initialize current induction variables.
     for (unsigned i = 0; i < ivs.size(); ++i) {
