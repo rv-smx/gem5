@@ -55,8 +55,7 @@ constexpr unsigned MAX_MEMORY_NUM = 32;
 constexpr unsigned MAX_ADDR_NUM = 4;
 
 constexpr unsigned MAX_PC_MEM_ID_PAIRS = 32;
-constexpr unsigned MAX_RUNAHEAD_STEPS = 32;
-constexpr unsigned MIN_RUNAHEAD_STEPS = 4;
+constexpr unsigned NUM_RUNAHEAD_STEPS = 32;
 
 /**
  * Listener for O3 CPU commit events.
@@ -632,15 +631,15 @@ StreamEngine::getRunaheadAddrForPc(Addr pc, Addr &vaddr)
     auto indvars = currentIndvars;
     auto iq = [&indvars](unsigned id) { return indvars[id]; };
     unsigned step = 0;
-    for (step = 0; step < MAX_RUNAHEAD_STEPS; ++step) {
+    for (step = 0; step < NUM_RUNAHEAD_STEPS; ++step) {
         if (stepIndvars(indvars, indvars.size() - 1, iq)) {
             break;
         }
     }
 
-    // Bail out if runahead steps is too small.
-    if (step < MIN_RUNAHEAD_STEPS) {
-        DPRINTF(StreamEngine, "Runahead steps=%u is too small\n", step);
+    // Bail out if runahead steps reached the EOL.
+    if (step < NUM_RUNAHEAD_STEPS) {
+        DPRINTF(StreamEngine, "Runahead steps=%u reached the EOL\n", step);
         return false;
     }
 

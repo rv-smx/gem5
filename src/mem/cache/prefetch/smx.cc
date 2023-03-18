@@ -46,7 +46,7 @@ RiscvISA::StreamEngine *
 SMX::getSE()
 {
     if (se) return se;
-    
+
     // Get system.
     fatal_if(System::systemList.size() != 1,
         "There must be only one system");
