@@ -29,13 +29,11 @@
 #ifndef __ARCH_RISCV_STREAM_ENGINE_HH__
 #define __ARCH_RISCV_STREAM_ENGINE_HH__
 
-#include <deque>
 #include <queue>
 #include <vector>
 
 #include "arch/riscv/insts/smx.hh"
 #include "base/types.hh"
-#include "mem/request.hh"
 #include "sim/eventq.hh"
 #include "sim/serialize.hh"
 
@@ -50,22 +48,22 @@ namespace RiscvISA
 
 enum SmxStopCond
 {
-  SMX_COND_GT = 0,
-  SMX_COND_GE = 1,
-  SMX_COND_LT = 2,
-  SMX_COND_LE = 3,
-  SMX_COND_GTU = 4,
-  SMX_COND_GEU = 5,
-  SMX_COND_LTU = 6,
-  SMX_COND_LEU = 7,
-  SMX_COND_EQ = 8,
-  SMX_COND_NE = 9,
+    SMX_COND_GT = 0,
+    SMX_COND_GE = 1,
+    SMX_COND_LT = 2,
+    SMX_COND_LE = 3,
+    SMX_COND_GTU = 4,
+    SMX_COND_GEU = 5,
+    SMX_COND_LTU = 6,
+    SMX_COND_LEU = 7,
+    SMX_COND_EQ = 8,
+    SMX_COND_NE = 9,
 };
 
 enum SmxStreamKind
 {
-  SMX_KIND_IV = 0,
-  SMX_KIND_MS = 1,
+    SMX_KIND_IV = 0,
+    SMX_KIND_MS = 1,
 };
 
 /**
@@ -103,6 +101,7 @@ class StreamEngine
 
     std::vector<IndvarConfig> ivs;
     std::vector<MemoryConfig> mems;
+    std::vector<unsigned> prefetchMems;
 
     void addAddrConfigForLastMem(RegVal stride, unsigned dep,
             SmxStreamKind kind);
@@ -119,27 +118,12 @@ class StreamEngine
 
     void removeCommitListener();
 
-    enum RequestState
-    {
-        Ready,
-        Pending,
-        Retrying,
-        Finished,
-    };
-
-    struct PrefetchRequest
-    {
-        RequestState state;
-        RequestPtr request;
-    };
-
     bool prefetchEnable;
     std::vector<RegVal> prefetchIndvars;
-    unsigned prefetchMemStreamIdx;
+    unsigned prefetchMemsIdx;
     std::queue<std::vector<RegVal>> prefetchQueue;
-    std::deque<PrefetchRequest> requestQueue;
+    std::queue<Addr> requestQueue;
     EventFunctionWrapper prefetchEvent;
-    void *memChannelInjector;
 
     void schedulePrefetch();
     void prefetchNext();
@@ -212,12 +196,11 @@ class StreamEngine
     /** @} */
 
     /**
-     * @ingroup Used by prefetch requests.
+     * @ingroup Used by prefetcher.
      * @{
      */
 
-    void finishAddrTranslation(unsigned req_id, bool has_fault);
-    void finishRetry(unsigned req_id);
+    bool popPrefetchRequest(Addr &vaddr);
 
     /** @} */
 };

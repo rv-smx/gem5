@@ -687,3 +687,11 @@ class PIFPrefetcher(QueuedPrefetcher):
         self.addEvent(
             HWPProbeEventRetiredInsts(self, simObj, "RetiredInstsPC")
         )
+
+class SMXPrefetcher(QueuedPrefetcher):
+    type = "SMXPrefetcher"
+    cxx_class = "gem5::prefetch::SMX"
+    cxx_header = "mem/cache/prefetch/smx.hh"
+
+    on_inst = False
+    use_virtual_addresses = True

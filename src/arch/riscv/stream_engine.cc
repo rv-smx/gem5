@@ -28,22 +28,22 @@
 
 #include "arch/riscv/stream_engine.hh"
 
+#include <algorithm>
 #include <cassert>
 #include <cstdint>
 #include <sstream>
 #include <utility>
 
-#include "arch/generic/mmu.hh"
 #include "arch/riscv/isa.hh"
 #include "arch/riscv/regs/int.hh"
 #include "base/bitfield.hh"
 #include "base/compiler.hh"
 #include "base/logging.hh"
+#include "base/trace.hh"
 #include "cpu/exec_context.hh"
 #include "cpu/thread_context.hh"
 #include "cpu/o3/dyn_inst.hh"
 #include "debug/StreamEngine.hh"
-#include "mem/port.hh"
 #include "sim/probe/probe.hh"
 
 namespace
@@ -55,11 +55,12 @@ constexpr unsigned MAX_INDVAR_NUM = RiscvISA::IndvarRegNum;
 constexpr unsigned MAX_MEMORY_NUM = 32;
 constexpr unsigned MAX_ADDR_NUM = 4;
 
-constexpr unsigned MAX_PREF_QUEUE_ENTRIES = 64;
-constexpr unsigned NUM_REQS_PER_PREF = 8;
-constexpr unsigned MAX_PREF_REQ_QUEUE_ENTRIES =
-    MAX_PREF_QUEUE_ENTRIES * NUM_REQS_PER_PREF;
-constexpr unsigned MAX_PREF_QUEUE_CONSUME_ENTRIES = 2;
+constexpr unsigned MAX_RUNAHEAD_STEPS = 64;
+constexpr unsigned MAX_PREF_STEPS = 32;
+constexpr unsigned MAX_REQS_PER_PREF = 8;
+constexpr unsigned MAX_REQ_QUEUE_ENTRIES = MAX_PREF_STEPS * MAX_REQS_PER_PREF;
+constexpr unsigned MAX_PREF_QUEUE_ENTRIES = MAX_RUNAHEAD_STEPS + MAX_PREF_STEPS;
+constexpr unsigned MAX_PREF_QUEUE_CONSUME_ENTRIES = 8;
 
 /**
  * Listener for O3 CPU commit events.
@@ -93,232 +94,6 @@ class CommitProbeListener : public ProbeListenerArgBase<o3::DynInstPtr>
         // Step instructions.
         if (name.rfind("smx_step", 0) == 0)
             return se.commitStep(inst.get(), op);
-    }
-};
-
-/**
- * Address translation request.
- */
-class AddrTranslationReq : public BaseMMU::Translation
-{
-  private:
-    unsigned reqId;
-
-  public:
-    AddrTranslationReq(unsigned _reqId) : reqId(_reqId) {}
-
-    void markDelayed() override { /* Nothing to do. */ }
-
-    void
-    finish(const Fault &fault, const RequestPtr &req,
-        ThreadContext *tc, BaseMMU::Mode mode)
-    {
-        auto isa = static_cast<RiscvISA::ISA *>(tc->getIsaPtr());
-        auto &se = isa->streamEngine();
-
-        // Tell stream engine to update request's state.
-        se.finishAddrTranslation(reqId, fault != NoFault);
-    }
-};
-
-/**
- * Inject memory channel between CPU and cache/memory.
- */
-class MemoryChannelInjector : public Packet::SenderState
-{
-  private:
-    class ChannelResponse : public ResponsePort
-    {
-      private:
-        MemoryChannelInjector &mci;
-
-      protected:
-        Tick
-        recvAtomicBackdoor(PacketPtr pkt, MemBackdoorPtr &backdoor) override
-        {
-            return mci.request.sendAtomicBackdoor(pkt, backdoor);
-        }
-
-        bool
-        tryTiming(PacketPtr pkt) override
-        {
-            return mci.request.tryTiming(pkt);
-        }
-
-        bool
-        recvTimingSnoopResp(PacketPtr pkt) override
-        {
-            return mci.request.sendTimingSnoopResp(pkt);
-        }
-
-        Tick
-        recvAtomic(PacketPtr pkt) override
-        {
-            return mci.request.sendAtomic(pkt);
-        }
-
-        bool
-        recvTimingReq(PacketPtr pkt) override
-        {
-            return mci.request.sendTimingReq(pkt);
-        }
-
-        void
-        recvRespRetry() override
-        {
-            mci.request.sendRetryResp();
-        }
-
-        void
-        recvFunctional(PacketPtr pkt) override
-        {
-            mci.request.sendFunctional(pkt);
-        }
-
-      public:
-        ChannelResponse(MemoryChannelInjector &_mci)
-            : ResponsePort("stream_engine.mci.response", nullptr),
-                mci(_mci)
-        {
-        }
-
-        AddrRangeList
-        getAddrRanges() const override
-        {
-            return mci.request.getAddrRanges();
-        }
-    };
-
-    friend ChannelResponse;
-
-    class ChannelRequest : public RequestPort
-    {
-      private:
-        MemoryChannelInjector &mci;
-
-      protected:
-        void
-        recvRangeChange() override
-        {
-            mci.response.sendRangeChange();
-        }
-
-        Tick
-        recvAtomicSnoop(PacketPtr pkt) override
-        {
-            return mci.response.sendAtomicSnoop(pkt);
-        }
-
-        void
-        recvFunctionalSnoop(PacketPtr pkt) override
-        {
-            mci.response.sendFunctionalSnoop(pkt);
-        }
-
-        void
-        recvTimingSnoopReq(PacketPtr pkt) override
-        {
-            mci.response.sendTimingSnoopReq(pkt);
-        }
-
-        void
-        recvRetrySnoopResp() override
-        {
-            mci.response.sendRetrySnoopResp();
-        }
-
-        bool
-        recvTimingResp(PacketPtr pkt) override
-        {
-            if (pkt->senderState ==
-                    static_cast<Packet::SenderState *>(&mci)) {
-                // The packet is a prefetch request, delete it.
-                delete pkt;
-                return true;
-            } else {
-                return mci.response.sendTimingResp(pkt);
-            }
-        }
-
-        void
-        recvReqRetry() override
-        {
-            mci.retryPrefetch();
-            mci.response.sendRetryReq();
-        }
-
-      public:
-        ChannelRequest(MemoryChannelInjector &_mci)
-            : RequestPort("stream_engine.mci.request", nullptr),
-                mci(_mci)
-        {
-        }
-
-        bool
-        isSnooping() const override
-        {
-            return mci.response.isSnooping();
-        }
-    };
-
-    friend ChannelRequest;
-
-    ChannelResponse response;
-    ChannelRequest request;
-    RiscvISA::StreamEngine &se;
-    RequestPort &cpuReq;
-    std::queue<std::pair<unsigned, PacketPtr>> pendingRetries;
-
-    void
-    retryPrefetch()
-    {
-        for (unsigned i = 0; i < NUM_REQS_PER_PREF; ++i) {
-            if (pendingRetries.empty()) return;
-
-            // Pick a pending packet from queue and send.
-            auto [id, packet] = pendingRetries.front();
-            if (!request.sendTimingReq(packet)) {
-                // Cache blocked, wait for next retry.
-                return;
-            } else {
-                // Inform the stream engine that retry finished.
-                se.finishRetry(id);
-                // Remove the packet from the queue.
-                pendingRetries.pop();
-            }
-        }
-    }
-
-  public:
-    MemoryChannelInjector(RiscvISA::StreamEngine &_se, RequestPort &_cpuReq)
-        : response(*this), request(*this), se(_se), cpuReq(_cpuReq)
-    {
-        auto &peer = cpuReq.getPeer();
-        cpuReq.bind(response);
-        request.bind(peer);
-    }
-
-    ~MemoryChannelInjector()
-    {
-        auto &peer = request.getPeer();
-        request.unbind();
-        cpuReq.bind(peer);
-    }
-
-    bool
-    sendPrefetchReq(unsigned req_id, const RequestPtr &req)
-    {
-        // Create a new packet.
-        auto packet = Packet::createRead(req);
-        packet->allocate();
-        packet->senderState = this;
-        // Send packet.
-        if (!request.sendTimingReq(packet)) {
-            // Failed, push to retry queue.
-            pendingRetries.push({req_id, packet});
-            return false;
-        }
-        return true;
     }
 };
 
@@ -397,9 +172,10 @@ void
 StreamEngine::addMemoryConfig(RegVal base, RegVal stride1, unsigned dep1,
         SmxStreamKind kind1, bool prefetch, unsigned width)
 {
-    DPRINTF(StreamEngine, "Memory stream %u: base=0x%llx\n",
-        (unsigned)mems.size(), base);
+    auto mem_id = static_cast<unsigned>(mems.size());
+    DPRINTF(StreamEngine, "Memory stream %u: base=0x%llx\n", mem_id, base);
     mems.push_back({base, prefetch, width, {}});
+    if (prefetch) prefetchMems.push_back(mem_id);
     addAddrConfigForLastMem(stride1, dep1, kind1);
     ++committedConfigs;
 }
@@ -441,35 +217,22 @@ StreamEngine::prefetchNext()
         return;
     }
 
-    // Remove finished prefetch requests.
-    while (!requestQueue.empty() &&
-        requestQueue.front().state == Finished) {
-        requestQueue.pop_front();
-    }
-
     // Update prefetch queue.
     if (prefetchQueue.size() >= MAX_PREF_QUEUE_ENTRIES) {
         DPRINTF(StreamEngine,
             "Prefetcher stalled due to prefetch queue is full\n");
     } else {
         DPRINTF(StreamEngine, "Prefetcher running\n");
-        // Send prefetch request to LSU.
+        // Send prefetch request to cache.
         enqueuePrefetchReq();
         // Check if all memory streams are prefetched
-        if (prefetchMemStreamIdx >= mems.size()) {
-            prefetchMemStreamIdx = 0;
+        if (prefetchMemsIdx >= prefetchMems.size()) {
+            prefetchMemsIdx = 0;
             // Prefetch complete, update queue and state.
             prefetchQueue.push(prefetchIndvars);
             // Update induction variables and state.
             if (stepPrefetchIndvars()) prefetchEnable = false;
         }
-    }
-
-    // Update request queue.
-    for (unsigned i = 0;
-        i < NUM_REQS_PER_PREF && i < requestQueue.size(); ++i)
-    {
-        handlePrefetchReq(i);
     }
 
     // Schedule for the next cycle.
@@ -479,22 +242,12 @@ StreamEngine::prefetchNext()
 void
 StreamEngine::enqueuePrefetchReq()
 {
-    // Skip unprefetchable streams.
-    while (!mems[prefetchMemStreamIdx].prefetch) ++prefetchMemStreamIdx;
-
     for (unsigned i = 0;
-        i < NUM_REQS_PER_PREF && prefetchMemStreamIdx < mems.size();
+        i < MAX_REQS_PER_PREF && prefetchMemsIdx < prefetchMems.size();
         ++i)
     {
-        // Check if we can enqueue new request.
-        if (requestQueue.size() >= MAX_PREF_REQ_QUEUE_ENTRIES) {
-            DPRINTF(StreamEngine, "Can not enqueue prefetch request "
-                "due to request queue full\n");
-            return;
-        }
-
         // Get memory address for prefetch.
-        const auto &mem = mems[prefetchMemStreamIdx];
+        const auto &mem = mems[prefetchMems[prefetchMemsIdx]];
         Addr vaddr = mem.base;
         for (const auto &addr : mem.addrs) {
             assert(addr.kind == SMX_KIND_IV);
@@ -502,41 +255,23 @@ StreamEngine::enqueuePrefetchReq()
         }
 
         // Enqueue prefetch request.
-        auto request = std::make_shared<Request>(
-            vaddr, 1 << mem.width, Request::PREFETCH,
-            tc->getCpuPtr()->dataRequestorId(), -1, -1);
-        requestQueue.push_back({Ready, std::move(request)});
+        requestQueue.push(vaddr);
         DPRINTF(StreamEngine,
             "Enqueued prefetch request for address 0x%llx\n", vaddr);
 
-        // Update memory stream index, skip unprefetchable streams.
-        ++prefetchMemStreamIdx;
-        while (prefetchMemStreamIdx < mems.size() &&
-            !mems[prefetchMemStreamIdx].prefetch)
-        {
-            ++prefetchMemStreamIdx;
-        }
+        // Update memory stream index.
+        ++prefetchMemsIdx;
     }
-}
 
-void
-StreamEngine::handlePrefetchReq(unsigned req_id)
-{
-    auto &req = requestQueue[req_id];
-    switch (req.state) {
-      case Ready: {
-        // Send address translation request to MMU.
-        auto trans = new AddrTranslationReq(req_id);
-        tc->getMMUPtr()->translateTiming(
-            req.request, tc, trans, BaseMMU::Read);
-        break;
-      }
-      case Pending:
-        // Wait for the callback to do the rest things.
-        break;
-      case Finished:
-      default:
-        GEM5_UNREACHABLE;
+    // Check if the request queue is full.
+    auto max_req_queue_entries = std::min(
+        MAX_PREF_STEPS * static_cast<unsigned>(prefetchMems.size()),
+        MAX_REQ_QUEUE_ENTRIES);
+    while (requestQueue.size() > max_req_queue_entries) {
+        DPRINTF(StreamEngine, "Request queue is full, "
+            "dropped the oldest request vaddr=0x%llx\n",
+            requestQueue.front());
+        requestQueue.pop();
     }
 }
 
@@ -561,7 +296,7 @@ StreamEngine::consumePrefetchQueue(const std::vector<RegVal> &indvars)
     // reset induction variables.
     while (!prefetchQueue.empty()) prefetchQueue.pop();
     prefetchIndvars = indvars;
-    prefetchMemStreamIdx = 0;
+    prefetchMemsIdx = 0;
     {
         std::string s;
         DPRINTF(StreamEngine, "Prefetch queue cleared and indvars reset, "
@@ -595,12 +330,13 @@ StreamEngine::clear()
 {
     ivs.clear();
     mems.clear();
+    prefetchMems.clear();
     committedConfigs = 0;
     prefetchEnable = false;
     prefetchIndvars.clear();
-    prefetchMemStreamIdx = 0;
+    prefetchMemsIdx = 0;
     while (!prefetchQueue.empty()) prefetchQueue.pop();
-    requestQueue.clear();
+    while (!requestQueue.empty()) requestQueue.pop();
 }
 
 void
@@ -929,10 +665,6 @@ StreamEngine::commitReady(ExecContext *xc)
     prefetchEnable = true;
     schedulePrefetch();
 
-    // Inject memory channel.
-    auto cpu = xc->tcBase()->getCpuPtr();
-    memChannelInjector = new MemoryChannelInjector(
-        *this, *dynamic_cast<RequestPort *>(&cpu->getDataPort()));
     DPRINTF(StreamEngine, "Stream memory access is ready\n");
 }
 
@@ -941,9 +673,6 @@ StreamEngine::commitEnd()
 {
     // Reset state.
     clear();
-    // Remove memory channel injector.
-    auto mci = static_cast<MemoryChannelInjector *>(memChannelInjector);
-    delete mci;
     DPRINTF(StreamEngine, "Stream memory access ended\n");
 }
 
@@ -977,41 +706,13 @@ StreamEngine::commitStep(ExecContext *xc, const SmxOp *op)
     if (!should_step) consumePrefetchQueue(indvars);
 }
 
-void
-StreamEngine::finishAddrTranslation(unsigned req_id, bool has_fault)
+bool
+StreamEngine::popPrefetchRequest(Addr &vaddr)
 {
-    auto &req = requestQueue[req_id];
-
-    // Ignore any kind of faults.
-    if (has_fault) {
-        DPRINTF(StreamEngine,
-            "Address translation for vaddr=0x%llx has fault, ignored\n",
-            req.request->getVaddr());
-        req.state = Finished;
-        return;
-    }
-
-    // Send load request to cache.
-    DPRINTF(StreamEngine,
-        "Address translation vaddr=0x%llx -> paddr=0x%llx done, "
-        "sending load request to cache\n",
-        req.request->getVaddr(), req.request->getPaddr());
-    auto mci = static_cast<MemoryChannelInjector *>(memChannelInjector);
-    if (mci->sendPrefetchReq(req_id, req.request)) {
-        req.state = Finished;
-    } else {
-        DPRINTF(StreamEngine,
-            "Load request %u failed due to cache blocked, retry pended\n",
-            req_id);
-        req.state = Retrying;
-    }
-}
-
-void
-StreamEngine::finishRetry(unsigned req_id)
-{
-    DPRINTF(StreamEngine, "Load request %u finished retry\n", req_id);
-    requestQueue[req_id].state = Finished;
+    if (requestQueue.empty()) return false;
+    vaddr = requestQueue.front();
+    requestQueue.pop();
+    return true;
 }
 
 } // namespace RiscvISA
