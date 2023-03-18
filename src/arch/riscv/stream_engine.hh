@@ -29,12 +29,13 @@
 #ifndef __ARCH_RISCV_STREAM_ENGINE_HH__
 #define __ARCH_RISCV_STREAM_ENGINE_HH__
 
-#include <queue>
+#include <deque>
+#include <functional>
 #include <vector>
+#include <utility>
 
 #include "arch/riscv/insts/smx.hh"
 #include "base/types.hh"
-#include "sim/eventq.hh"
 #include "sim/serialize.hh"
 
 namespace gem5
@@ -99,9 +100,10 @@ class StreamEngine
         std::vector<AddrConfig> addrs;
     };
 
+    using IndvarQuerier = std::function<RegVal(unsigned)>;
+
     std::vector<IndvarConfig> ivs;
     std::vector<MemoryConfig> mems;
-    std::vector<unsigned> prefetchMems;
 
     void addAddrConfigForLastMem(RegVal stride, unsigned dep,
             SmxStreamKind kind);
@@ -112,41 +114,28 @@ class StreamEngine
     void addAddrConfig(RegVal stride1, unsigned dep1, SmxStreamKind kind1,
             RegVal stride2, unsigned dep2, SmxStreamKind kind2);
 
+    Addr getMemoryAddrWithIndvars(unsigned memory_id,
+            IndvarQuerier iq) const;
+
+    /**
+     * Steps the given induction variables.
+     * @return `true` if reaches the end of the loop.
+     */
+    bool stepIndvars(std::vector<RegVal> &indvars,
+            unsigned indvar_id, IndvarQuerier iq) const;
+
     ThreadContext *tc;
     void *commitListener;
     unsigned committedConfigs;
 
     void removeCommitListener();
 
-    bool prefetchEnable;
-    std::vector<RegVal> prefetchIndvars;
-    unsigned prefetchMemsIdx;
-    std::queue<std::vector<RegVal>> prefetchQueue;
-    std::queue<Addr> requestQueue;
-    EventFunctionWrapper prefetchEvent;
-
-    void schedulePrefetch();
-    void prefetchNext();
-    void enqueuePrefetchReq();
-    void handlePrefetchReq(unsigned req_id);
-
-    /**
-     * Called when committing `step` instructions.
-     * @param indvars Induction variables after step (must be valid).
-     */
-    void consumePrefetchQueue(const std::vector<RegVal> &indvars);
-
-    /**
-     * Steps prefetch induction variables.
-     * @return `true` if all induction variables
-     *         are reset to initial value.
-     */
-    bool stepPrefetchIndvars();
+    bool isReady;
+    std::deque<std::pair<Addr, unsigned>> pcMemIdPairs;
+    std::vector<RegVal> currentIndvars;
 
   public:
-    StreamEngine()
-        : tc(nullptr), commitListener(nullptr),
-            prefetchEvent([this] { prefetchNext(); }, "stream_engine")
+    StreamEngine() : tc(nullptr), commitListener(nullptr)
     {
         clear();
     }
@@ -178,7 +167,7 @@ class StreamEngine
 
     bool isValidStream(unsigned id, SmxStreamKind kind) const;
     Addr getMemoryAddr(ExecContext *xc, const SmxOp *op,
-            unsigned memory_id) const;
+            unsigned memory_id);
     bool isNotInLoop(unsigned indvar_id, RegVal value) const;
 
     /**
@@ -200,7 +189,7 @@ class StreamEngine
      * @{
      */
 
-    bool popPrefetchRequest(Addr &vaddr);
+    bool getRunaheadAddrForPc(Addr pc, Addr &vaddr);
 
     /** @} */
 };

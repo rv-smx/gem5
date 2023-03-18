@@ -75,15 +75,21 @@ void
 SMX::calculatePrefetch(const PrefetchInfo &pfi,
                        std::vector<AddrPriority> &addresses)
 {
+    // PC is required.
+    if (!pfi.hasPC()) {
+        DPRINTF(StreamEngine, "Ignoring request with no PC\n");
+        return;
+    }
+
     auto se = getSE();
 
-    // Try to pop prefetch requests from stream engine.
+    // Try get virtual address for the current request.
     Addr vaddr;
-    while (se->popPrefetchRequest(vaddr)) {
-        addresses.push_back({vaddr, 0});
-        DPRINTF(StreamEngine, "Calculated prefetch request vaddr=0x%llx\n",
-            vaddr);
-    }
+    if (!se->getRunaheadAddrForPc(pfi.getPC(), vaddr)) return;
+
+    addresses.push_back({vaddr, 0});
+    DPRINTF(StreamEngine, "Calculated prefetch request vaddr=0x%llx\n",
+        vaddr);
 }
 
 } // namespace prefetch

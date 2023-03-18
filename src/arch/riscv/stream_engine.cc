@@ -32,7 +32,6 @@
 #include <cassert>
 #include <cstdint>
 #include <sstream>
-#include <utility>
 
 #include "arch/riscv/isa.hh"
 #include "arch/riscv/regs/int.hh"
@@ -55,12 +54,9 @@ constexpr unsigned MAX_INDVAR_NUM = RiscvISA::IndvarRegNum;
 constexpr unsigned MAX_MEMORY_NUM = 32;
 constexpr unsigned MAX_ADDR_NUM = 4;
 
-constexpr unsigned MAX_RUNAHEAD_STEPS = 64;
-constexpr unsigned MAX_PREF_STEPS = 32;
-constexpr unsigned MAX_REQS_PER_PREF = 8;
-constexpr unsigned MAX_REQ_QUEUE_ENTRIES = MAX_PREF_STEPS * MAX_REQS_PER_PREF;
-constexpr unsigned MAX_PREF_QUEUE_ENTRIES = MAX_RUNAHEAD_STEPS + MAX_PREF_STEPS;
-constexpr unsigned MAX_PREF_QUEUE_CONSUME_ENTRIES = 8;
+constexpr unsigned MAX_PC_MEM_ID_PAIRS = 32;
+constexpr unsigned MAX_RUNAHEAD_STEPS = 32;
+constexpr unsigned MIN_RUNAHEAD_STEPS = 4;
 
 /**
  * Listener for O3 CPU commit events.
@@ -175,7 +171,6 @@ StreamEngine::addMemoryConfig(RegVal base, RegVal stride1, unsigned dep1,
     auto mem_id = static_cast<unsigned>(mems.size());
     DPRINTF(StreamEngine, "Memory stream %u: base=0x%llx\n", mem_id, base);
     mems.push_back({base, prefetch, width, {}});
-    if (prefetch) prefetchMems.push_back(mem_id);
     addAddrConfigForLastMem(stride1, dep1, kind1);
     ++committedConfigs;
 }
@@ -190,6 +185,45 @@ StreamEngine::addAddrConfig(
     ++committedConfigs;
 }
 
+Addr
+StreamEngine::getMemoryAddrWithIndvars(unsigned memory_id,
+        IndvarQuerier iq) const
+{
+    const auto &mem = mems[memory_id];
+    Addr vaddr = mem.base;
+    for (const auto &addr : mem.addrs) {
+        assert(addr.kind == SMX_KIND_IV);
+        vaddr += iq(addr.dep) * addr.stride;
+    }
+    return vaddr;
+}
+
+bool
+StreamEngine::stepIndvars(std::vector<RegVal> &indvars,
+        unsigned indvar_id, IndvarQuerier iq) const
+{
+    bool should_step = true;
+    for (unsigned id = ivs.size() - 1; id <= ivs.size() - 1; --id) {
+        auto &iv = ivs[id];
+        if (id > indvar_id) {
+            indvars[id] = iv.initVal;
+        } else {
+            auto value = iq(id);
+            if (should_step) {
+                value = applyWidthUnsigned(value + iv.stepVal, iv.width,
+                    iv.isUnsigned);
+                if (isNotInLoop(indvar_id, value)) {
+                    value = iv.initVal;
+                } else {
+                    should_step = false;
+                }
+            }
+            indvars[id] = value;
+        }
+    }
+    return should_step;
+}
+
 void
 StreamEngine::removeCommitListener()
 {
@@ -202,141 +236,14 @@ StreamEngine::removeCommitListener()
 }
 
 void
-StreamEngine::schedulePrefetch()
-{
-    auto cpu = tc->getCpuPtr();
-    cpu->schedule(prefetchEvent, cpu->clockEdge(Cycles(1)));
-}
-
-void
-StreamEngine::prefetchNext()
-{
-    if (!prefetchEnable) {
-        DPRINTF(StreamEngine, "Prefetcher stopped\n");
-        // Do not schedule the next event, just return.
-        return;
-    }
-
-    // Update prefetch queue.
-    if (prefetchQueue.size() >= MAX_PREF_QUEUE_ENTRIES) {
-        DPRINTF(StreamEngine,
-            "Prefetcher stalled due to prefetch queue is full\n");
-    } else {
-        DPRINTF(StreamEngine, "Prefetcher running\n");
-        // Send prefetch request to cache.
-        enqueuePrefetchReq();
-        // Check if all memory streams are prefetched
-        if (prefetchMemsIdx >= prefetchMems.size()) {
-            prefetchMemsIdx = 0;
-            // Prefetch complete, update queue and state.
-            prefetchQueue.push(prefetchIndvars);
-            // Update induction variables and state.
-            if (stepPrefetchIndvars()) prefetchEnable = false;
-        }
-    }
-
-    // Schedule for the next cycle.
-    schedulePrefetch();
-}
-
-void
-StreamEngine::enqueuePrefetchReq()
-{
-    for (unsigned i = 0;
-        i < MAX_REQS_PER_PREF && prefetchMemsIdx < prefetchMems.size();
-        ++i)
-    {
-        // Get memory address for prefetch.
-        const auto &mem = mems[prefetchMems[prefetchMemsIdx]];
-        Addr vaddr = mem.base;
-        for (const auto &addr : mem.addrs) {
-            assert(addr.kind == SMX_KIND_IV);
-            vaddr += prefetchIndvars[addr.dep] * addr.stride;
-        }
-
-        // Enqueue prefetch request.
-        requestQueue.push(vaddr);
-        DPRINTF(StreamEngine,
-            "Enqueued prefetch request for address 0x%llx\n", vaddr);
-
-        // Update memory stream index.
-        ++prefetchMemsIdx;
-    }
-
-    // Check if the request queue is full.
-    auto max_req_queue_entries = std::min(
-        MAX_PREF_STEPS * static_cast<unsigned>(prefetchMems.size()),
-        MAX_REQ_QUEUE_ENTRIES);
-    while (requestQueue.size() > max_req_queue_entries) {
-        DPRINTF(StreamEngine, "Request queue is full, "
-            "dropped the oldest request vaddr=0x%llx\n",
-            requestQueue.front());
-        requestQueue.pop();
-    }
-}
-
-void
-StreamEngine::consumePrefetchQueue(const std::vector<RegVal> &indvars)
-{
-    if (!prefetchEnable) return;
-    // Check the first few entries of the prefetch queue.
-    for (unsigned i = 0; i < MAX_PREF_QUEUE_CONSUME_ENTRIES; ++i) {
-        if (prefetchQueue.empty()) break;
-        if (indvars == prefetchQueue.front()) {
-            std::string s;
-            DPRINTF(StreamEngine,
-                "Consumed prefetch queue entry before indvars=(%s)\n",
-                (s = indvarsToString(indvars)).c_str());
-            return;
-        }
-        prefetchQueue.pop();
-    }
-    // The current induction variables and the first few entries
-    // of the queue are not the same, clear the queue and
-    // reset induction variables.
-    while (!prefetchQueue.empty()) prefetchQueue.pop();
-    prefetchIndvars = indvars;
-    prefetchMemsIdx = 0;
-    {
-        std::string s;
-        DPRINTF(StreamEngine, "Prefetch queue cleared and indvars reset, "
-            "indvars (%s) not found\n",
-            (s = indvarsToString(indvars)).c_str());
-    }
-}
-
-bool
-StreamEngine::stepPrefetchIndvars()
-{
-    unsigned id = ivs.size() - 1;
-    for (auto it = prefetchIndvars.rbegin();
-        it != prefetchIndvars.rend(); ++it, --id)
-    {
-        const auto &iv = ivs[id];
-        *it = applyWidthUnsigned(*it + iv.stepVal, iv.width,
-            iv.isUnsigned);
-        if (isNotInLoop(id, *it)) {
-            *it = iv.initVal;
-            if (!id) return true;
-        } else {
-            break;
-        }
-    }
-    return false;
-}
-
-void
 StreamEngine::clear()
 {
     ivs.clear();
     mems.clear();
-    prefetchMems.clear();
     committedConfigs = 0;
-    prefetchEnable = false;
-    prefetchIndvars.clear();
-    prefetchMemsIdx = 0;
-    while (!prefetchQueue.empty()) prefetchQueue.pop();
-    while (!requestQueue.empty()) requestQueue.pop();
+    isReady = false;
+    pcMemIdPairs.clear();
+    currentIndvars.clear();
 }
 
 void
@@ -562,16 +469,32 @@ StreamEngine::isValidStream(unsigned id, SmxStreamKind kind) const
 
 Addr
 StreamEngine::getMemoryAddr(ExecContext *xc, const SmxOp *op,
-        unsigned memory_id) const
+        unsigned memory_id)
 {
-    const auto &mem = mems[memory_id];
-    Addr vaddr = mem.base;
-    for (const auto &addr : mem.addrs) {
-        assert(addr.kind == SMX_KIND_IV);
-        vaddr += getIndvarSrcReg(xc, op, addr.dep) * addr.stride;
-    }
+    // Calculate virtual address.
+    auto vaddr = getMemoryAddrWithIndvars(memory_id,
+        [this, xc, op](unsigned id) {
+            return getIndvarSrcReg(xc, op, id);
+        });
     DPRINTF(StreamEngine, "Got memory address 0x%llx from stream %u\n",
         vaddr, memory_id);
+
+    // Update PC-memory ID pairs.
+    if (mems[memory_id].prefetch) {
+        auto pc = xc->pcState().instAddr();
+        auto it = std::find_if(pcMemIdPairs.begin(), pcMemIdPairs.end(),
+            [pc](const auto &p) { return p.first == pc; });
+        if (it != pcMemIdPairs.end()) {
+            // Check if ID is same.
+            assert(it->second == memory_id);
+        } else {
+            // Insert a new pair.
+            pcMemIdPairs.push_back({pc, memory_id});
+            if (pcMemIdPairs.size() > MAX_PC_MEM_ID_PAIRS) {
+                pcMemIdPairs.pop_front();
+            }
+        }
+    }
     return vaddr;
 }
 
@@ -653,17 +576,14 @@ StreamEngine::commitAddrConfig(ExecContext *xc, const SmxOp *op)
 void
 StreamEngine::commitReady(ExecContext *xc)
 {
-    // Check if prefetch is not enabled.
-    if (prefetchEnable) return;
+    // Check if is not ready.
+    if (isReady) return;
+    isReady = true;
 
-    // Initialize prefetch induction variables.
+    // Initialize current induction variables.
     for (unsigned i = 0; i < ivs.size(); ++i) {
-        prefetchIndvars.push_back(ivs[i].initVal);
+        currentIndvars.push_back(ivs[i].initVal);
     }
-
-    // Start prefetch.
-    prefetchEnable = true;
-    schedulePrefetch();
 
     DPRINTF(StreamEngine, "Stream memory access is ready\n");
 }
@@ -680,38 +600,56 @@ void
 StreamEngine::commitStep(ExecContext *xc, const SmxOp *op)
 {
     auto indvar_id = bits(op->machInst, 19, 15);
-    // Get stepped induction variables.
-    std::vector<RegVal> indvars;
-    indvars.resize(ivs.size());
-    bool should_step = true;
-    for (unsigned id = ivs.size() - 1; id <= ivs.size() - 1; --id) {
-        auto &iv = ivs[id];
-        if (id > indvar_id) {
-            indvars[id] = iv.initVal;
-        } else {
-            auto value = getIndvarSrcReg(xc, op, id);
-            if (should_step) {
-                value = applyWidthUnsigned(value + iv.stepVal, iv.width,
-                    iv.isUnsigned);
-                if (isNotInLoop(indvar_id, value)) {
-                    value = iv.initVal;
-                } else {
-                    should_step = false;
-                }
-            }
-            indvars[id] = value;
-        }
-    }
-    // Update prefetch queue.
-    if (!should_step) consumePrefetchQueue(indvars);
+    // Update the current induction variables.
+    stepIndvars(currentIndvars, indvar_id,
+        [this, xc, op](unsigned id) {
+            return getIndvarSrcReg(xc, op, id);
+        });
 }
 
 bool
-StreamEngine::popPrefetchRequest(Addr &vaddr)
+StreamEngine::getRunaheadAddrForPc(Addr pc, Addr &vaddr)
 {
-    if (requestQueue.empty()) return false;
-    vaddr = requestQueue.front();
-    requestQueue.pop();
+    // Bail out if the stream engine is not ready.
+    if (!isReady) return false;
+
+    // Find for a PC-memory ID pair.
+    auto it = std::find_if(pcMemIdPairs.begin(), pcMemIdPairs.end(),
+        [pc](const auto &p) { return p.first == pc; });
+    if (it == pcMemIdPairs.end()) {
+        DPRINTF(StreamEngine, "PC=0x%llx is not found in stream engine\n",
+            pc);
+        return false;
+    }
+
+    // Debug for the current induction variables.
+    auto iv_str = indvarsToString(currentIndvars);
+    DPRINTF(StreamEngine, "Current induction variables: %s\n",
+        iv_str.c_str());
+
+    // Perform runahead.
+    auto indvars = currentIndvars;
+    auto iq = [&indvars](unsigned id) { return indvars[id]; };
+    unsigned step = 0;
+    for (step = 0; step < MAX_RUNAHEAD_STEPS; ++step) {
+        if (stepIndvars(indvars, indvars.size() - 1, iq)) {
+            break;
+        }
+    }
+
+    // Bail out if runahead steps is too small.
+    if (step < MIN_RUNAHEAD_STEPS) {
+        DPRINTF(StreamEngine, "Runahead steps=%u is too small\n", step);
+        return false;
+    }
+
+    // Debug for the induction variables after runahead.
+    iv_str = indvarsToString(indvars);
+    DPRINTF(StreamEngine, "Induction variables after runahead: %s\n",
+        iv_str.c_str());
+
+    // Get virtual address.
+    vaddr = getMemoryAddrWithIndvars(it->second, iq);
     return true;
 }
 
