@@ -57,6 +57,7 @@ constexpr unsigned MAX_ADDR_NUM = 4;
 constexpr unsigned MAX_PC_MEM_ID_PAIRS = 32;
 constexpr unsigned RUNAHEAD_STEPS_INIT = 8;
 constexpr unsigned RUNAHEAD_STEPS_INC = 2;
+constexpr unsigned RUNAHEAD_STEPS_MAX = 128;
 constexpr unsigned RUNAHEAD_COUNTER_BITS = 3;
 constexpr unsigned RUNAHEAD_COUNTER_INIT = 0;
 constexpr unsigned RUNAHEAD_COUNTER_THRESHOLD = 7;
@@ -691,6 +692,9 @@ StreamEngine::updateRunaheadStepsForPC(Addr pc, bool late)
     // Check if the counter reaches the threshold.
     if (runahead_info.late_counter >= RUNAHEAD_COUNTER_THRESHOLD) {
         runahead_info.num_steps += RUNAHEAD_STEPS_INC;
+        if (runahead_info.num_steps > RUNAHEAD_STEPS_MAX) {
+            runahead_info.num_steps = RUNAHEAD_STEPS_MAX;
+        }
         DPRINTF(StreamEngine, "Set runahead steps for memory stream "
             "%u to %u due to last prefetch lateness\n",
             it->second, runahead_info.num_steps);
