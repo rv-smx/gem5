@@ -55,7 +55,11 @@ constexpr unsigned MAX_MEMORY_NUM = 32;
 constexpr unsigned MAX_ADDR_NUM = 4;
 
 constexpr unsigned MAX_PC_MEM_ID_PAIRS = 32;
-constexpr unsigned NUM_RUNAHEAD_STEPS = 32;
+constexpr unsigned RUNAHEAD_STEPS_INIT = 8;
+constexpr unsigned RUNAHEAD_STEPS_INC = 2;
+constexpr unsigned RUNAHEAD_COUNTER_BITS = 3;
+constexpr unsigned RUNAHEAD_COUNTER_INIT = 0;
+constexpr unsigned RUNAHEAD_COUNTER_THRESHOLD = 7;
 
 /**
  * Listener for O3 CPU commit events.
@@ -243,6 +247,7 @@ StreamEngine::clear()
     isReady = false;
     pcMemIdPairs.clear();
     currentIndvars.clear();
+    runaheadInfoList.clear();
 }
 
 void
@@ -585,6 +590,11 @@ StreamEngine::commitReady(ExecContext *xc)
         currentIndvars.push_back(ivs[i].initVal);
     }
 
+    // Initialize runahead steps.
+    runaheadInfoList.resize(mems.size(),
+        {RUNAHEAD_STEPS_INIT,
+            SatCounter8(RUNAHEAD_COUNTER_BITS, RUNAHEAD_COUNTER_INIT)});
+
     DPRINTF(StreamEngine, "Stream memory access is ready\n");
 }
 
@@ -608,7 +618,7 @@ StreamEngine::commitStep(ExecContext *xc, const SmxOp *op)
 }
 
 bool
-StreamEngine::getRunaheadAddrForPc(Addr pc, Addr &vaddr)
+StreamEngine::getRunaheadAddrForPC(Addr pc, Addr &vaddr)
 {
     // Bail out if the stream engine is not ready.
     if (!isReady) return false;
@@ -622,23 +632,25 @@ StreamEngine::getRunaheadAddrForPc(Addr pc, Addr &vaddr)
         return false;
     }
 
-    // Debug for the current induction variables.
+    // Debug for the current induction variables and runahead steps.
     auto iv_str = indvarsToString(currentIndvars);
-    DPRINTF(StreamEngine, "Current induction variables: %s\n",
-        iv_str.c_str());
+    auto runahead_steps = runaheadInfoList[it->second].num_steps;
+    DPRINTF(StreamEngine, "Current induction variables: %s, "
+        "runahead steps of memory stream %u: %u\n",
+        iv_str.c_str(), it->second, runahead_steps);
 
     // Perform runahead.
     auto indvars = currentIndvars;
     auto iq = [&indvars](unsigned id) { return indvars[id]; };
     unsigned step = 0;
-    for (step = 0; step < NUM_RUNAHEAD_STEPS; ++step) {
+    for (step = 0; step < runahead_steps; ++step) {
         if (stepIndvars(indvars, indvars.size() - 1, iq)) {
             break;
         }
     }
 
     // Bail out if runahead steps reached the EOL.
-    if (step < NUM_RUNAHEAD_STEPS) {
+    if (step < runahead_steps) {
         DPRINTF(StreamEngine, "Runahead steps=%u reached the EOL\n", step);
         return false;
     }
@@ -651,6 +663,38 @@ StreamEngine::getRunaheadAddrForPc(Addr pc, Addr &vaddr)
     // Get virtual address.
     vaddr = getMemoryAddrWithIndvars(it->second, iq);
     return true;
+}
+
+void
+StreamEngine::updateRunaheadStepsForPC(Addr pc, bool late)
+{
+    // Bail out if the stream engine is not ready.
+    if (!isReady) return;
+
+    // Find for a PC-memory ID pair.
+    auto it = std::find_if(pcMemIdPairs.begin(), pcMemIdPairs.end(),
+        [pc](const auto &p) { return p.first == pc; });
+    assert(it != pcMemIdPairs.end());
+
+    // Update late counter.
+    auto &runahead_info = runaheadInfoList[it->second];
+    if (late) {
+        ++runahead_info.late_counter;
+        DPRINTF(StreamEngine, "Increased late counter for "
+            "memory stream %u\n", it->second);
+    } else {
+        --runahead_info.late_counter;
+        DPRINTF(StreamEngine, "Decreased late counter for "
+            "memory stream %u\n", it->second);
+    }
+
+    // Check if the counter reaches the threshold.
+    if (runahead_info.late_counter >= RUNAHEAD_COUNTER_THRESHOLD) {
+        runahead_info.num_steps += RUNAHEAD_STEPS_INC;
+        DPRINTF(StreamEngine, "Set runahead steps for memory stream "
+            "%u to %u due to last prefetch lateness\n",
+            it->second, runahead_info.num_steps);
+    }
 }
 
 } // namespace RiscvISA

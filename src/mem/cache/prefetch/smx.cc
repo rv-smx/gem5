@@ -67,8 +67,32 @@ SMX::getSE()
     return se;
 }
 
-SMX::SMX(const SMXPrefetcherParams &p) : Queued(p), se(nullptr)
+SMX::SMX(const SMXPrefetcherParams &p)
+    : Queued(p), se(nullptr), lastPC(0), lastPCValid(false), lastLate(0)
 {
+}
+
+PacketPtr
+SMX::getPacket()
+{
+    auto pkt = Queued::getPacket();
+
+    // Update runahead steps for the last stream prefetch.
+    auto late = prefetchStats.pfLate.total();
+    if (lastPCValid) {
+        getSE()->updateRunaheadStepsForPC(lastPC, late > lastLate);
+    }
+    lastLate = late;
+
+    // Update last PC.
+    if (pkt) {
+        lastPC = pkt->req->getPC();
+        lastPCValid = true;
+    } else {
+        lastPCValid = false;
+    }
+
+    return pkt;
 }
 
 void
@@ -76,16 +100,11 @@ SMX::calculatePrefetch(const PrefetchInfo &pfi,
                        std::vector<AddrPriority> &addresses)
 {
     // PC is required.
-    if (!pfi.hasPC()) {
-        DPRINTF(StreamEngine, "Ignoring request with no PC\n");
-        return;
-    }
-
-    auto se = getSE();
+    if (!pfi.hasPC()) return;
 
     // Try get virtual address for the current request.
     Addr vaddr;
-    if (!se->getRunaheadAddrForPc(pfi.getPC(), vaddr)) return;
+    if (!getSE()->getRunaheadAddrForPC(pfi.getPC(), vaddr)) return;
 
     addresses.push_back({vaddr, 0});
     DPRINTF(StreamEngine, "Calculated prefetch request vaddr=0x%llx\n",

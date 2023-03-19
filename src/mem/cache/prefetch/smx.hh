@@ -53,11 +53,16 @@ class SMX : public Queued
 {
   private:
     RiscvISA::StreamEngine *se;
+    Addr lastPC;
+    bool lastPCValid;
+    statistics::Result lastLate;
 
     RiscvISA::StreamEngine *getSE();
 
   public:
     SMX(const SMXPrefetcherParams &p);
+
+    PacketPtr getPacket() override;
 
     void calculatePrefetch(const PrefetchInfo &pfi,
                            std::vector<AddrPriority> &addresses) override;

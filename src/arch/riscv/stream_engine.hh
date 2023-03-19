@@ -35,6 +35,7 @@
 #include <utility>
 
 #include "arch/riscv/insts/smx.hh"
+#include "base/sat_counter.hh"
 #include "base/types.hh"
 #include "sim/serialize.hh"
 
@@ -130,9 +131,16 @@ class StreamEngine
 
     void removeCommitListener();
 
+    struct RunaheadInfo
+    {
+        unsigned num_steps;
+        SatCounter8 late_counter;
+    };
+
     bool isReady;
     std::deque<std::pair<Addr, unsigned>> pcMemIdPairs;
     std::vector<RegVal> currentIndvars;
+    std::vector<RunaheadInfo> runaheadInfoList;
 
   public:
     StreamEngine() : tc(nullptr), commitListener(nullptr)
@@ -189,7 +197,8 @@ class StreamEngine
      * @{
      */
 
-    bool getRunaheadAddrForPc(Addr pc, Addr &vaddr);
+    bool getRunaheadAddrForPC(Addr pc, Addr &vaddr);
+    void updateRunaheadStepsForPC(Addr pc, bool late);
 
     /** @} */
 };
